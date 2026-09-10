@@ -12,3 +12,6 @@ Thumbs.db
 # 파이썬
 __pycache__/
 *.pyc
+
+# Node.js
+node_modules/

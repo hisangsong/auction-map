@@ -324,6 +324,7 @@
           '<button class="doc-btn" id="docBtn_curst" onclick="openDoc(\'curst\')">현황조사서</button>'+
           '<button class="doc-btn" id="docBtn_aee" onclick="openDoc(\'aee\')">감정평가서</button>'+
         '</div>'+
+        '<button class="doc-btn" id="docBtn_analyze" style="margin-top:6px;width:100%;background:#a78bfa" onclick="openAnalyze()">🔍 권리분석 (AI)</button>'+
         '<div class="doc-msg" id="docMsg"></div>';
       document.getElementById("detail").classList.add("show");
     }
@@ -359,11 +360,32 @@
     }
 
     /* ---------- 매각물건명세서 · 현황조사서 · 감정평가서 ---------- */
+    const COURT_AUCTION_SEARCH_URL = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=%2Fpgj%2Fui%2Fpgj100%2FPGJ151F00.xml";
+
     async function openDoc(type) {
       const it = curDetailItem;
       const msg = document.getElementById("docMsg");
       const btn = document.getElementById("docBtn_" + type);
       if (!it) return;
+
+      // 매각물건명세서는 법원 문서뷰어가 발급 세션과 1:1로 묶인 토큰을 쓰기 때문에
+      // 우리 서버가 대신 열어줄 수 없다 (README 참고). 대신 사건번호를 복사해주고
+      // 공식 검색 화면을 열어 안내한다.
+      if (type === "maegak") {
+        const m = (it.사건번호 || "").match(/^(\d{4})타경(\d+)/);
+        const copyText = m ? m[2] : (it.사건번호 || "");
+        if (navigator.clipboard) navigator.clipboard.writeText(copyText).catch(() => {});
+        window.open(COURT_AUCTION_SEARCH_URL, "_blank", "noopener");
+        window.alert(
+          "매각물건명세서는 법원 사이트 보안정책상 새 창에서 직접 검색해야 합니다.\n\n" +
+          "새 창에서 대법원 법원경매정보 화면이 열립니다.\n" +
+          "1) 법원: " + (it.법원 || "") + "\n" +
+          "2) 사건번호 탭 → 연도 " + (m ? m[1] : "") + " 선택 → 사건번호란에 붙여넣기 (클립보드에 복사됨: " + copyText + ")\n" +
+          "3) 검색 → 물건 클릭 → 매각물건명세서 버튼 클릭"
+        );
+        return;
+      }
+
       if (!it.cortOfcCd || !it.saNo) {
         msg.textContent = "이 물건은 문서 조회에 필요한 사건 식별정보가 없습니다.";
         return;
@@ -399,6 +421,49 @@
         btn.disabled = false;
         btn.textContent = prevText;
       }
+    }
+
+    /* ---------- AI 권리분석 ---------- */
+    async function openAnalyze() {
+      const it = curDetailItem;
+      const msg = document.getElementById("docMsg");
+      const btn = document.getElementById("docBtn_analyze");
+      if (!it) return;
+      if (!it.cortOfcCd || !it.saNo) {
+        msg.textContent = "이 물건은 권리분석에 필요한 사건 식별정보가 없습니다.";
+        return;
+      }
+      msg.textContent = "";
+      btn.disabled = true;
+      const prevText = btn.textContent;
+      btn.textContent = "AI 분석 중… (수십 초 소요될 수 있습니다)";
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(it),
+        });
+        const json = await res.json();
+        if (!res.ok || json.error) {
+          msg.textContent = json.error || "권리분석에 실패했습니다.";
+          return;
+        }
+        renderAnalyzeModal(json.analysis, it);
+      } catch (e) {
+        msg.textContent = "요청 중 오류가 발생했습니다: " + e;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
+    }
+
+    function renderAnalyzeModal(analysis, it) {
+      const escaped = (analysis || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const html =
+        '<h3>🔍 AI 권리분석 · ' + (it.사건번호 || "") + '</h3>' +
+        '<div style="white-space:pre-wrap; font-size:13px; line-height:1.7;">' + escaped + '</div>';
+      document.getElementById("docModalBody").innerHTML = html;
+      document.getElementById("docModal").classList.add("show");
     }
 
     function renderCurstModal(data, it) {
