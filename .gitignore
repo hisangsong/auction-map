@@ -1,0 +1,10 @@
+# 운영체제가 만드는 잡파일
+.DS_Store
+Thumbs.db
+
+# 에디터 설정
+.vscode/
+.idea/
+
+# 로그
+*.log
