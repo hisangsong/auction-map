@@ -8,3 +8,7 @@ Thumbs.db
 
 # 로그
 *.log
+
+# 파이썬
+__pycache__/
+*.pyc
