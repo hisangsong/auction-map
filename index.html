@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>전국 공매물건 지도 (온비드)</title>
+  <title>서울 법원경매물건 지도</title>
   <style>
     :root {
       --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:rgba(148,163,184,0.18);
@@ -14,14 +14,16 @@
     body { font-family:"Segoe UI",-apple-system,"Malgun Gothic",sans-serif; background:var(--bg);
       color:var(--text); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
     header { flex:0 0 auto; padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--line);
-      display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
     header h1 { font-size:17px; white-space:nowrap; }
     header h1 .dot { color:var(--accent); }
     .src-badge { font-size:11px; color:#34d399; background:rgba(52,211,153,0.12);
       border:1px solid rgba(52,211,153,0.3); padding:3px 10px; border-radius:999px; white-space:nowrap; }
-    .filters { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
+    select { font-family:inherit; font-size:13px; color:var(--text); background:var(--panel2);
+      border:1px solid var(--line); padding:7px 12px; border-radius:8px; cursor:pointer; }
+    .filters { display:flex; gap:7px; margin-left:auto; flex-wrap:wrap; }
     .filters button { font-family:inherit; font-size:13px; cursor:pointer; color:var(--muted);
-      background:var(--panel2); border:1px solid var(--line); padding:6px 13px; border-radius:999px; transition:all .15s; }
+      background:var(--panel2); border:1px solid var(--line); padding:6px 12px; border-radius:999px; transition:all .15s; }
     .filters button:hover { color:var(--text); }
     .filters button.active { color:#0f172a; font-weight:600; }
     .main { flex:1 1 auto; display:flex; min-height:0; }
@@ -32,12 +34,11 @@
     .item:hover { border-color:var(--accent); transform:translateY(-1px); }
     .item.active { border-color:var(--accent); box-shadow:0 0 0 2px rgba(56,189,248,.3); }
     .item .top { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-    .type-tag { font-size:11px; font-weight:700; color:#fff; padding:2px 8px; border-radius:6px; }
-    .item .name { font-size:14px; font-weight:700; line-height:1.4; }
-    .item .addr { font-size:12px; color:var(--muted); margin-top:3px; line-height:1.4; }
+    .type-tag { font-size:11px; font-weight:700; color:#fff; padding:2px 8px; border-radius:6px; white-space:nowrap; }
+    .item .addr { font-size:13px; font-weight:600; line-height:1.4; }
     .item .row2 { display:flex; justify-content:space-between; align-items:flex-end; margin-top:10px; }
     .item .price { color:var(--accent); font-weight:700; font-size:15px; }
-    .item .date { font-size:12px; color:var(--muted); }
+    .item .meta { font-size:12px; color:var(--muted); }
     #map { flex:1 1 auto; min-width:0; background:#111827; position:relative; }
     .price-pill { transform:translate(-50%,-100%); color:#fff; font-size:12px; font-weight:700; padding:5px 10px;
       border-radius:999px; white-space:nowrap; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.4); border:2px solid #fff; position:relative; }
@@ -49,19 +50,19 @@
       z-index:20; display:none; max-height:75%; overflow-y:auto; }
     .detail.show { display:block; }
     .detail .close { position:absolute; top:12px; right:14px; cursor:pointer; color:var(--muted); font-size:20px; background:none; border:none; }
-    .detail h3 { font-size:15px; margin:6px 0 4px; line-height:1.4; padding-right:20px; }
-    .detail .addr { font-size:12px; color:var(--muted); margin-bottom:12px; }
+    .detail h3 { font-size:15px; margin:6px 0 4px; line-height:1.45; padding-right:20px; }
+    .detail .sub { font-size:12px; color:var(--muted); margin-bottom:12px; }
     .detail .row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; gap:10px; }
     .detail .row span:first-child { color:var(--muted); white-space:nowrap; }
     .detail .row .val { text-align:right; }
     .detail .row .low { color:var(--accent); font-weight:700; }
     .detail .row .discount { color:#f87171; font-size:11px; margin-left:4px; }
+    .detail .note { font-size:12px; color:var(--muted); margin-top:10px; line-height:1.5; }
     .overlay-msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
       background:rgba(17,24,39,.85); z-index:30; padding:30px; text-align:center; }
     .overlay-msg .box { max-width:470px; }
     .overlay-msg h2 { color:var(--accent); margin-bottom:12px; }
     .overlay-msg p { color:var(--muted); line-height:1.7; font-size:14px; }
-    .overlay-msg code { background:var(--panel2); padding:2px 6px; border-radius:4px; color:#fbbf24; }
     @media (max-width:720px) {
       .sidebar { flex-basis:100%; position:absolute; z-index:15; height:45%; bottom:0; border-right:none; border-top:1px solid var(--line); }
       .main { flex-direction:column; }
@@ -71,14 +72,15 @@
 </head>
 <body>
   <header>
-    <h1>🔨 전국 <span class="dot">공매물건</span> 지도</h1>
-    <span class="src-badge">캠코 온비드 공식 공매물건</span>
+    <h1>⚖️ 서울 <span class="dot">법원경매물건</span> 지도</h1>
+    <span class="src-badge" id="srcBadge">서울시 법원경매 실데이터</span>
+    <select id="guSel"></select>
     <div class="filters" id="filters"></div>
   </header>
 
   <div class="main">
     <aside class="sidebar">
-      <div class="count" id="count">준비 중…</div>
+      <div class="count" id="count">불러오는 중…</div>
       <div id="list"></div>
     </aside>
     <div id="map"></div>
@@ -91,20 +93,19 @@
 
   <script>
     const KAKAO_APP_KEY = "dcbb55fb29c50a738f7b5ea69c035b93";
-    const CAP = 60; // 지도에 표시할 최대 물건 수(주소변환 부담 고려)
+    const CAP = 80; // 지도에 한 번에 표시할 최대 물건 수(주소변환 부담 고려)
 
-    const 색상 = { 아파트:"#2563eb", 주택:"#0891b2", 토지:"#16a34a", 상가:"#ea580c", 차량:"#7c3aed", 기타:"#64748b" };
-    const 분류목록 = ["전체", "아파트", "주택", "토지", "상가", "차량", "기타"];
+    const 색상 = { 아파트:"#2563eb", 주택:"#0891b2", 토지:"#16a34a", 상가:"#ea580c", 기타:"#64748b" };
+    const 분류목록 = ["전체","아파트","주택","상가","토지","기타"];
 
-    let map, places, overlays = [], items = [], currentFilter = "전체", activeIdx = -1;
+    let map, places, DATA = { gu:[], items:[] }, shown = [], curGu = "", curType = "전체", activeIdx = -1;
 
     function 분류(용도) {
       const u = 용도 || "";
       if (/아파트/.test(u)) return "아파트";
-      if (/주택|빌라|다세대|연립|오피스텔|근생/.test(u)) return "주택";
-      if (/토지|대지|임야|전答|전|답|과수|잡종|농지/.test(u)) return "토지";
-      if (/상가|근린|사무|점포|공장|창고|건물/.test(u)) return "상가";
-      if (/차량|자동차|승용|화물|중장비|이륜/.test(u)) return "차량";
+      if (/다세대|단독|연립|빌라|다가구|오피스텔|주택|도시형/.test(u)) return "주택";
+      if (/상가|근린|점포|사무|공장|창고|숙박|건물/.test(u)) return "상가";
+      if (/토지|대지|임야|전|답|과수|잡종|농지|도로/.test(u)) return "토지";
       return "기타";
     }
     function 억(원) {
@@ -113,9 +114,7 @@
       if (원 >= 1e4) return Math.round(원/1e4).toLocaleString() + "만";
       return 원.toLocaleString();
     }
-    function 날짜(s) { return (!s || s.length < 8) ? "-" : s.slice(0,4)+"."+s.slice(4,6)+"."+s.slice(6,8); }
 
-    /* ---- 카카오맵 ---- */
     function loadKakao() {
       const s = document.createElement("script");
       s.src = "//dapi.kakao.com/v2/maps/sdk.js?appkey=" + KAKAO_APP_KEY + "&autoload=false&libraries=services";
@@ -123,36 +122,50 @@
       s.onerror = () => showOverlay("지도 로딩 실패", "카카오 앱 키/도메인 등록을 확인하세요.");
       document.head.appendChild(s);
     }
-    function initMap() {
-      map = new kakao.maps.Map(document.getElementById("map"), { center: new kakao.maps.LatLng(36.4,127.8), level:13 });
+
+    async function initMap() {
+      map = new kakao.maps.Map(document.getElementById("map"), { center:new kakao.maps.LatLng(37.5665,126.9780), level:8 });
       places = new kakao.maps.services.Places();
-      load();
+      try {
+        DATA = await (await fetch("data.json")).json();
+      } catch (e) { showOverlay("데이터 로딩 실패", "data.json 을 불러오지 못했습니다: " + e); return; }
+      document.getElementById("srcBadge").textContent = "서울시 법원경매 실데이터 " + DATA.items.length.toLocaleString() + "건";
+      buildGuSelect();
+      curGu = DATA.gu[0] || "";
+      document.getElementById("guSel").value = curGu;
+      apply();
     }
 
-    /* ---- 데이터 불러오기 ---- */
-    async function load() {
-      document.getElementById("count").textContent = "온비드에서 공매물건 불러오는 중…";
+    function buildGuSelect() {
+      const sel = document.getElementById("guSel");
+      DATA.gu.forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
+      sel.onchange = () => { curGu = sel.value; activeIdx = -1; closeDetail(); apply(); };
+    }
+    function buildFilters() {
+      const box = document.getElementById("filters"); box.innerHTML = "";
+      분류목록.forEach(t => {
+        const b = document.createElement("button"); b.textContent = t;
+        if (t === curType) { b.className = "active"; b.style.background = t === "전체" ? "var(--accent)" : (색상[t] || "var(--accent)"); }
+        b.onclick = () => { curType = t; activeIdx = -1; apply(); };
+        box.appendChild(b);
+      });
+    }
+
+    /* 구·용도로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
+    async function apply() {
       buildFilters();
-      let json;
-      try { json = await (await fetch("/api/deals?rows=200")).json(); }
-      catch (e) { showOverlay("불러오기 실패", "서버 함수 호출 실패: " + e); return; }
-
-      if (json.error === "NO_KEY") {
-        showOverlay("🔑 API 키 설정이 필요해요",
-          "Vercel 환경변수 <code>DATA_GO_KR_KEY</code> 에 공공데이터포털 인증키를 등록하고 <b>온비드 물건정보 조회서비스</b>를 활용신청한 뒤 재배포하면 실제 공매물건이 표시됩니다.");
-        document.getElementById("count").textContent = "API 키 필요"; return;
-      }
-      if (json.error) { showOverlay("데이터 오류", (json.message || json.error)); document.getElementById("count").textContent = "오류"; return; }
-
-      // 소재지(주소) 있는 물건만, 최대 CAP개 → 주소를 좌표로 변환
-      const withAddr = (json.items || []).filter(it => it.소재지).slice(0, CAP);
-      items = withAddr;
-      document.getElementById("count").textContent = "공매물건 " + items.length + "건 · 위치 찾는 중…";
-      for (const it of items) {
-        it.분류 = 분류(it.용도);
+      shown = DATA.items
+        .filter(it => it.시군구 === curGu)
+        .map(it => { it.분류 = it.분류 || 분류(it.용도); return it; })
+        .filter(it => curType === "전체" || it.분류 === curType)
+        .slice(0, CAP);
+      document.getElementById("count").textContent = curGu + " · " + shown.length + "건 · 위치 찾는 중…";
+      renderList();
+      for (const it of shown) {
         if (it.lat == null) {
           const r = await geocodeP(it.소재지, 2);
           if (r) { it.lat = r.lat; it.lng = r.lng; }
+          else it.lat = it.lat; // 못 찾으면 그대로 (마커 생략)
         }
       }
       render();
@@ -169,51 +182,35 @@
       });
     }
 
-    /* ---- 필터 ---- */
-    function buildFilters() {
-      const box = document.getElementById("filters"); box.innerHTML = "";
-      분류목록.forEach(t => {
-        const b = document.createElement("button");
-        b.textContent = t;
-        if (t === currentFilter) { b.className = "active"; b.style.background = t === "전체" ? "var(--accent)" : (색상[t] || "var(--accent)"); }
-        b.onclick = () => { currentFilter = t; render(); };
-        box.appendChild(b);
+    function renderList() {
+      document.getElementById("count").textContent = curGu + " · 총 " + shown.length + "건";
+      const list = document.getElementById("list"); list.innerHTML = "";
+      shown.forEach((it, i) => {
+        const el = document.createElement("div");
+        el.className = "item" + (i === activeIdx ? " active" : "");
+        el.innerHTML =
+          '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
+          '<span class="meta">'+it.용도+'</span></div>'+
+          '<div class="addr">'+it.소재지+'</div>'+
+          '<div class="row2"><span class="price">'+억(it.최저가)+' <span class="meta">('+it.최저가율+'%)</span></span>'+
+          '<span class="meta">유찰 '+it.유찰+' · '+it.매각기일+'</span></div>';
+        el.onclick = () => selectItem(i);
+        list.appendChild(el);
       });
     }
 
-    /* ---- 그리기 ---- */
     function render() {
-      buildFilters();
-      const shown = items.filter(it => currentFilter === "전체" || it.분류 === currentFilter);
-      document.getElementById("count").textContent = "총 " + shown.length + "건";
-
-      const list = document.getElementById("list"); list.innerHTML = "";
-      shown.forEach((it) => {
-        const idx = items.indexOf(it);
-        const el = document.createElement("div");
-        el.className = "item" + (idx === activeIdx ? " active" : "");
-        el.innerHTML =
-          '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
-          '<span class="date">'+it.용도+'</span></div>'+
-          '<div class="name">'+(it.물건명||"(이름없음)")+'</div>'+
-          '<div class="addr">'+it.소재지+'</div>'+
-          '<div class="row2"><span class="price">'+억(it.최저입찰가)+'</span>'+
-          '<span class="date">~'+날짜(it.입찰종료)+'</span></div>';
-        el.onclick = () => selectItem(idx);
-        list.appendChild(el);
-      });
-
+      renderList();
       clearOverlays();
       if (!map) return;
       const bounds = new kakao.maps.LatLngBounds(); let placed = 0;
-      shown.forEach((it) => {
+      shown.forEach((it, i) => {
         if (it.lat == null) return;
-        const idx = items.indexOf(it);
         const pill = document.createElement("div");
-        pill.className = "price-pill" + (idx === activeIdx ? " active" : "");
+        pill.className = "price-pill" + (i === activeIdx ? " active" : "");
         pill.style.background = 색상[it.분류];
-        pill.textContent = 억(it.최저입찰가);
-        pill.onclick = () => selectItem(idx);
+        pill.textContent = 억(it.최저가);
+        pill.onclick = () => selectItem(i);
         const pos = new kakao.maps.LatLng(it.lat, it.lng);
         const ov = new kakao.maps.CustomOverlay({ position: pos, content: pill, yAnchor: 1 });
         ov.setMap(map); overlays.push(ov); bounds.extend(pos); placed++;
@@ -221,39 +218,39 @@
       if (placed && activeIdx < 0) map.setBounds(bounds);
     }
 
-    function selectItem(idx) {
-      activeIdx = idx;
-      const it = items[idx];
+    let overlays = [];
+    function clearOverlays() { overlays.forEach(o => o.setMap(null)); overlays = []; }
+
+    function selectItem(i) {
+      activeIdx = i;
+      const it = shown[i];
       if (map && it.lat != null) map.panTo(new kakao.maps.LatLng(it.lat, it.lng));
       showDetail(it); render();
     }
 
     function showDetail(it) {
-      const 저감 = it.감정가 ? Math.round((1 - it.최저입찰가/it.감정가) * 100) : 0;
+      const 저감 = it.감정가 ? Math.round((1 - it.최저가/it.감정가) * 100) : 0;
       document.getElementById("detailBody").innerHTML =
         '<span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
-        '<h3>'+(it.물건명||"(이름없음)")+'</h3><div class="addr">'+it.소재지+'</div>'+
+        '<h3>'+it.소재지+'</h3>'+
+        '<div class="sub">'+it.법원+' · '+it.사건번호+'</div>'+
         '<div class="row"><span>용도</span><span class="val">'+it.용도+'</span></div>'+
-        '<div class="row"><span>처분방식</span><span class="val">'+(it.처분방식||"-")+'</span></div>'+
         '<div class="row"><span>감정가</span><span class="val">'+억(it.감정가)+'</span></div>'+
-        '<div class="row"><span>최저입찰가</span><span class="val low">'+억(it.최저입찰가)+
-          (저감>0?'<span class="discount">'+저감+'% 저감</span>':'')+'</span></div>'+
-        '<div class="row"><span>입찰기간</span><span class="val">'+날짜(it.입찰시작)+' ~ '+날짜(it.입찰종료)+'</span></div>'+
-        '<div class="row"><span>상태</span><span class="val">'+(it.상태||"-")+'</span></div>'+
-        '<div class="row"><span>물건관리번호</span><span class="val">'+(it.물건관리번호||"-")+'</span></div>'+
-        '<div class="row"><span>공매번호</span><span class="val">'+(it.공매번호||"-")+'</span></div>';
+        '<div class="row"><span>최저매각가</span><span class="val low">'+억(it.최저가)+
+          '<span class="discount">'+it.최저가율+'%</span></span></div>'+
+        '<div class="row"><span>유찰</span><span class="val">'+it.유찰+'회</span></div>'+
+        '<div class="row"><span>매각기일</span><span class="val">'+it.매각기일+'</span></div>'+
+        (it.면적구조 ? '<div class="note">📐 '+it.면적구조+'</div>' : '')+
+        (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '');
       document.getElementById("detail").classList.add("show");
     }
-    function closeDetail() { document.getElementById("detail").classList.remove("show"); activeIdx = -1; render(); }
+    function closeDetail() { document.getElementById("detail").classList.remove("show"); activeIdx = -1; }
 
-    function clearOverlays() { overlays.forEach(o => o.setMap(null)); overlays = []; }
     function showOverlay(title, msg) {
-      hideOverlay();
-      const g = document.createElement("div"); g.className = "overlay-msg"; g.id = "overlayMsg";
+      const g = document.createElement("div"); g.className = "overlay-msg";
       g.innerHTML = '<div class="box"><h2>'+title+'</h2><p>'+msg+'</p></div>';
       document.getElementById("map").appendChild(g);
     }
-    function hideOverlay() { document.getElementById("overlayMsg")?.remove(); }
 
     loadKakao();
   </script>
