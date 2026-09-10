@@ -58,6 +58,11 @@
     .detail .row .low { color:var(--accent); font-weight:700; }
     .detail .row .discount { color:#f87171; font-size:11px; margin-left:4px; }
     .detail .note { font-size:12px; color:var(--muted); margin-top:10px; line-height:1.5; }
+    .detail .official-btn { display:block; width:100%; margin-top:14px; padding:10px 12px; font-family:inherit;
+      font-size:13px; font-weight:600; color:#0f172a; background:var(--accent); border:none; border-radius:10px;
+      cursor:pointer; text-align:center; }
+    .detail .official-btn:hover { filter:brightness(1.08); }
+    .detail .official-hint { font-size:11px; color:var(--muted); margin-top:6px; line-height:1.5; }
     .overlay-msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
       background:rgba(17,24,39,.85); z-index:30; padding:30px; text-align:center; }
     .overlay-msg .box { max-width:470px; }
@@ -251,6 +256,7 @@
     }
 
     function showDetail(it) {
+      curDetailItem = it;
       const 저감 = it.감정가 ? Math.round((1 - it.최저가/it.감정가) * 100) : 0;
       document.getElementById("detailBody").innerHTML =
         '<span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
@@ -263,10 +269,29 @@
         '<div class="row"><span>유찰</span><span class="val">'+it.유찰+'회</span></div>'+
         '<div class="row"><span>매각기일</span><span class="val">'+it.매각기일+'</span></div>'+
         (it.면적구조 ? '<div class="note">📐 '+it.면적구조+'</div>' : '')+
-        (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '');
+        (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '')+
+        '<button class="official-btn" onclick="openOfficialDocs()">⚖ 매각물건명세서·현황조사서·감정평가서 원본보기</button>'+
+        '<div class="official-hint">대법원 법원경매정보 사이트가 새 창으로 열립니다. 사건번호가 자동으로 복사되니, "사건번호" 검색조건에 붙여넣고 검색한 뒤 하단의 문서 버튼을 눌러 확인하세요.</div>';
       document.getElementById("detail").classList.add("show");
     }
     function closeDetail() { document.getElementById("detail").classList.remove("show"); activeIdx = -1; }
+
+    let curDetailItem = null;
+    const COURT_AUCTION_SEARCH_URL = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=%2Fpgj%2Fui%2Fpgj100%2FPGJ151F00.xml";
+    function openOfficialDocs() {
+      const it = curDetailItem;
+      if (!it) return;
+      const m = (it.사건번호 || "").match(/^(\d{4})타경(\d+)/);
+      const copyText = m ? m[2] : (it.사건번호 || "");
+      if (navigator.clipboard) navigator.clipboard.writeText(copyText).catch(() => {});
+      window.open(COURT_AUCTION_SEARCH_URL, "_blank", "noopener");
+      window.alert(
+        "새 창에서 대법원 법원경매정보 '물건상세검색' 화면이 열립니다.\n\n" +
+        "1) 법원: " + (it.법원 || "") + "\n" +
+        "2) 사건번호 탭 → 연도 " + (m ? m[1] : "") + " 선택 → 사건번호란에 붙여넣기 (Ctrl+V, 클립보드에 복사됨: " + copyText + ")\n" +
+        "3) 검색 버튼 클릭 → 물건 클릭 → 매각물건명세서 / 현황조사서 / 감정평가서 버튼 클릭"
+      );
+    }
 
     function showOverlay(title, msg) {
       const g = document.createElement("div"); g.className = "overlay-msg";
