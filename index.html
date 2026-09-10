@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>서울 법원경매물건 지도</title>
+  <title>전국 법원경매물건 지도</title>
   <style>
     :root {
       --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:rgba(148,163,184,0.18);
@@ -72,8 +72,9 @@
 </head>
 <body>
   <header>
-    <h1>⚖️ 서울 <span class="dot">법원경매물건</span> 지도</h1>
-    <span class="src-badge" id="srcBadge">서울시 법원경매 실데이터</span>
+    <h1>⚖️ 전국 <span class="dot">법원경매물건</span> 지도</h1>
+    <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
+    <select id="sidoSel"></select>
     <select id="guSel"></select>
     <div class="filters" id="filters"></div>
   </header>
@@ -98,7 +99,7 @@
     const 색상 = { 아파트:"#2563eb", 주택:"#0891b2", 토지:"#16a34a", 상가:"#ea580c", 기타:"#64748b" };
     const 분류목록 = ["전체","아파트","주택","상가","토지","기타"];
 
-    let map, places, DATA = { gu:[], items:[] }, shown = [], curGu = "", curType = "전체", activeIdx = -1;
+    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", activeIdx = -1, lastTotal = 0;
 
     function 분류(용도) {
       const u = 용도 || "";
@@ -114,6 +115,7 @@
       if (원 >= 1e4) return Math.round(원/1e4).toLocaleString() + "만";
       return 원.toLocaleString();
     }
+    function 지역라벨() { return curSido + (curGu === "전체" ? " 전체" : " " + curGu); }
 
     function loadKakao() {
       const s = document.createElement("script");
@@ -129,16 +131,33 @@
       try {
         DATA = await (await fetch("data.json")).json();
       } catch (e) { showOverlay("데이터 로딩 실패", "data.json 을 불러오지 못했습니다: " + e); return; }
-      document.getElementById("srcBadge").textContent = "서울시 법원경매 실데이터 " + DATA.items.length.toLocaleString() + "건";
+      document.getElementById("srcBadge").textContent = "전국 법원경매 실데이터 " + DATA.items.length.toLocaleString() + "건";
+      buildSidoSelect();
+      curSido = DATA.sido[0] || "";
+      document.getElementById("sidoSel").value = curSido;
       buildGuSelect();
-      curGu = DATA.gu[0] || "";
+      curGu = "전체";
       document.getElementById("guSel").value = curGu;
       apply();
     }
 
+    function buildSidoSelect() {
+      const sel = document.getElementById("sidoSel");
+      sel.innerHTML = "";
+      DATA.sido.forEach(s => { const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o); });
+      sel.onchange = () => {
+        curSido = sel.value;
+        buildGuSelect();
+        curGu = "전체";
+        document.getElementById("guSel").value = curGu;
+        activeIdx = -1; closeDetail(); apply();
+      };
+    }
     function buildGuSelect() {
       const sel = document.getElementById("guSel");
-      DATA.gu.forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
+      sel.innerHTML = "";
+      const optAll = document.createElement("option"); optAll.value = "전체"; optAll.textContent = "＋ 시/도 전체"; sel.appendChild(optAll);
+      (DATA.guBySido[curSido] || []).forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
       sel.onchange = () => { curGu = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
     function buildFilters() {
@@ -154,12 +173,14 @@
     /* 구·용도로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
     async function apply() {
       buildFilters();
-      shown = DATA.items
-        .filter(it => it.시군구 === curGu)
+      const all = DATA.items
+        .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
         .map(it => { it.분류 = it.분류 || 분류(it.용도); return it; })
-        .filter(it => curType === "전체" || it.분류 === curType)
-        .slice(0, CAP);
-      document.getElementById("count").textContent = curGu + " · " + shown.length + "건 · 위치 찾는 중…";
+        .filter(it => curType === "전체" || it.분류 === curType);
+      lastTotal = all.length;
+      shown = all.slice(0, CAP);
+      const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
+      document.getElementById("count").textContent = 지역라벨() + " · " + 표시 + " · 위치 찾는 중…";
       renderList();
       for (const it of shown) {
         if (it.lat == null) {
@@ -183,7 +204,8 @@
     }
 
     function renderList() {
-      document.getElementById("count").textContent = curGu + " · 총 " + shown.length + "건";
+      document.getElementById("count").textContent = 지역라벨() + " · " +
+        (lastTotal > shown.length ? "총 " + lastTotal + "건 중 " + shown.length + "건 표시" : "총 " + shown.length + "건");
       const list = document.getElementById("list"); list.innerHTML = "";
       shown.forEach((it, i) => {
         const el = document.createElement("div");
