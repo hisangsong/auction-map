@@ -76,6 +76,9 @@ def transform(rows: list[dict]) -> list[dict]:
             "시군구": row.get("hjguSigu", ""),
             "읍면동": row.get("hjguDong", ""),
             "고유번호": row.get("docid", ""),
+            "cortOfcCd": row.get("boCd", ""),
+            "saNo": row.get("saNo", ""),
+            "dspslGdsSeq": row.get("mokmulSer", ""),
         })
     return items
 

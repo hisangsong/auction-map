@@ -58,11 +58,31 @@
     .detail .row .low { color:var(--accent); font-weight:700; }
     .detail .row .discount { color:#f87171; font-size:11px; margin-left:4px; }
     .detail .note { font-size:12px; color:var(--muted); margin-top:10px; line-height:1.5; }
-    .detail .official-btn { display:block; width:100%; margin-top:14px; padding:10px 12px; font-family:inherit;
-      font-size:13px; font-weight:600; color:#0f172a; background:var(--accent); border:none; border-radius:10px;
-      cursor:pointer; text-align:center; }
-    .detail .official-btn:hover { filter:brightness(1.08); }
-    .detail .official-hint { font-size:11px; color:var(--muted); margin-top:6px; line-height:1.5; }
+    .doc-buttons { display:flex; gap:6px; margin-top:14px; flex-wrap:wrap; }
+    .doc-btn { flex:1 1 auto; padding:9px 8px; font-family:inherit; font-size:12px; font-weight:600;
+      color:#0f172a; background:var(--accent); border:none; border-radius:10px; cursor:pointer; text-align:center; }
+    .doc-btn:hover { filter:brightness(1.08); }
+    .doc-btn:disabled { opacity:.6; cursor:wait; filter:none; }
+    .doc-btn.secondary { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+    .doc-msg { font-size:11px; color:var(--muted); margin-top:6px; line-height:1.5; min-height:14px; }
+    .rv-box { display:none; width:100%; height:220px; margin-top:10px; border-radius:12px; overflow:hidden;
+      background:#111827; }
+    .rv-box.show { display:block; }
+    .rv-box .rv-empty { display:flex; align-items:center; justify-content:center; height:100%;
+      color:var(--muted); font-size:12px; }
+    .doc-modal { position:fixed; inset:0; z-index:40; display:none; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.6); padding:20px; }
+    .doc-modal.show { display:flex; }
+    .doc-modal .box { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px;
+      width:100%; max-width:640px; max-height:85vh; overflow-y:auto; position:relative; }
+    .doc-modal .close { position:absolute; top:14px; right:16px; cursor:pointer; color:var(--muted);
+      font-size:22px; background:none; border:none; }
+    .doc-modal h3 { font-size:16px; margin-bottom:14px; padding-right:24px; }
+    .doc-modal table { width:100%; border-collapse:collapse; margin-bottom:14px; font-size:13px; }
+    .doc-modal th, .doc-modal td { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left;
+      vertical-align:top; }
+    .doc-modal th { color:var(--muted); font-weight:600; white-space:nowrap; width:110px; }
+    .doc-modal .sec-h { font-size:13px; font-weight:700; color:var(--accent); margin:14px 0 6px; }
     .overlay-msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
       background:rgba(17,24,39,.85); z-index:30; padding:30px; text-align:center; }
     .overlay-msg .box { max-width:470px; }
@@ -82,6 +102,7 @@
     <select id="sidoSel"></select>
     <select id="guSel"></select>
     <div class="filters" id="filters"></div>
+    <div class="filters" id="yuchalFilters"></div>
   </header>
 
   <div class="main">
@@ -97,14 +118,22 @@
     <div id="detailBody"></div>
   </div>
 
+  <div class="doc-modal" id="docModal">
+    <div class="box">
+      <button class="close" onclick="closeDocModal()">×</button>
+      <div id="docModalBody"></div>
+    </div>
+  </div>
+
   <script>
     const KAKAO_APP_KEY = "dcbb55fb29c50a738f7b5ea69c035b93";
     const CAP = 80; // 지도에 한 번에 표시할 최대 물건 수(주소변환 부담 고려)
 
     const 색상 = { 아파트:"#2563eb", 주택:"#0891b2", 토지:"#16a34a", 상가:"#ea580c", 기타:"#64748b" };
     const 분류목록 = ["전체","아파트","주택","상가","토지","기타"];
+    const 유찰목록 = ["전체","최초","1회유찰","2회유찰","3회이상"];
 
-    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", activeIdx = -1, lastTotal = 0;
+    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", activeIdx = -1, lastTotal = 0;
 
     function 분류(용도) {
       const u = 용도 || "";
@@ -113,6 +142,13 @@
       if (/상가|근린|점포|사무|공장|창고|숙박|건물/.test(u)) return "상가";
       if (/토지|대지|임야|전|답|과수|잡종|농지|도로/.test(u)) return "토지";
       return "기타";
+    }
+    function 유찰구분(유찰) {
+      const n = 유찰 || 0;
+      if (n <= 0) return "최초";
+      if (n === 1) return "1회유찰";
+      if (n === 2) return "2회유찰";
+      return "3회이상";
     }
     function 억(원) {
       if (!원) return "-";
@@ -174,14 +210,25 @@
         box.appendChild(b);
       });
     }
+    function buildYuchalFilters() {
+      const box = document.getElementById("yuchalFilters"); box.innerHTML = "";
+      유찰목록.forEach(t => {
+        const b = document.createElement("button"); b.textContent = t;
+        if (t === curYuchal) { b.className = "active"; b.style.background = "var(--accent)"; }
+        b.onclick = () => { curYuchal = t; activeIdx = -1; apply(); };
+        box.appendChild(b);
+      });
+    }
 
-    /* 구·용도로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
+    /* 구·용도·유찰횟수로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
     async function apply() {
       buildFilters();
+      buildYuchalFilters();
       const all = DATA.items
         .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
-        .map(it => { it.분류 = it.분류 || 분류(it.용도); return it; })
-        .filter(it => curType === "전체" || it.분류 === curType);
+        .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; })
+        .filter(it => curType === "전체" || it.분류 === curType)
+        .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal);
       lastTotal = all.length;
       shown = all.slice(0, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
@@ -220,7 +267,7 @@
           '<span class="meta">'+it.용도+'</span></div>'+
           '<div class="addr">'+it.소재지+'</div>'+
           '<div class="row2"><span class="price">'+억(it.최저가)+' <span class="meta">('+it.최저가율+'%)</span></span>'+
-          '<span class="meta">유찰 '+it.유찰+' · '+it.매각기일+'</span></div>';
+          '<span class="meta">'+it.유찰구분+' · '+it.매각기일+'</span></div>';
         el.onclick = () => selectItem(i);
         list.appendChild(el);
       });
@@ -266,32 +313,121 @@
         '<div class="row"><span>감정가</span><span class="val">'+억(it.감정가)+'</span></div>'+
         '<div class="row"><span>최저매각가</span><span class="val low">'+억(it.최저가)+
           '<span class="discount">'+it.최저가율+'%</span></span></div>'+
-        '<div class="row"><span>유찰</span><span class="val">'+it.유찰+'회</span></div>'+
+        '<div class="row"><span>유찰</span><span class="val">'+it.유찰구분+' ('+it.유찰+'회)</span></div>'+
         '<div class="row"><span>매각기일</span><span class="val">'+it.매각기일+'</span></div>'+
         (it.면적구조 ? '<div class="note">📐 '+it.면적구조+'</div>' : '')+
         (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '')+
-        '<button class="official-btn" onclick="openOfficialDocs()">⚖ 매각물건명세서·현황조사서·감정평가서 원본보기</button>'+
-        '<div class="official-hint">대법원 법원경매정보 사이트가 새 창으로 열립니다. 사건번호가 자동으로 복사되니, "사건번호" 검색조건에 붙여넣고 검색한 뒤 하단의 문서 버튼을 눌러 확인하세요.</div>';
+        '<button class="doc-btn secondary" style="margin-top:14px;width:100%" onclick="toggleRoadview()">🚶 로드뷰 보기</button>'+
+        '<div class="rv-box" id="rvBox"></div>'+
+        '<div class="doc-buttons">'+
+          '<button class="doc-btn" id="docBtn_maegak" onclick="openDoc(\'maegak\')">매각물건명세서</button>'+
+          '<button class="doc-btn" id="docBtn_curst" onclick="openDoc(\'curst\')">현황조사서</button>'+
+          '<button class="doc-btn" id="docBtn_aee" onclick="openDoc(\'aee\')">감정평가서</button>'+
+        '</div>'+
+        '<div class="doc-msg" id="docMsg"></div>';
       document.getElementById("detail").classList.add("show");
     }
-    function closeDetail() { document.getElementById("detail").classList.remove("show"); activeIdx = -1; }
+    function closeDetail() {
+      document.getElementById("detail").classList.remove("show");
+      activeIdx = -1;
+      destroyRoadview();
+    }
 
     let curDetailItem = null;
-    const COURT_AUCTION_SEARCH_URL = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=%2Fpgj%2Fui%2Fpgj100%2FPGJ151F00.xml";
-    function openOfficialDocs() {
+
+    /* ---------- 카카오 로드뷰 ---------- */
+    let rvInstance = null;
+    function destroyRoadview() { rvInstance = null; }
+    function toggleRoadview() {
+      const box = document.getElementById("rvBox");
+      if (!box) return;
+      if (box.classList.contains("show")) { box.classList.remove("show"); box.innerHTML = ""; rvInstance = null; return; }
       const it = curDetailItem;
-      if (!it) return;
-      const m = (it.사건번호 || "").match(/^(\d{4})타경(\d+)/);
-      const copyText = m ? m[2] : (it.사건번호 || "");
-      if (navigator.clipboard) navigator.clipboard.writeText(copyText).catch(() => {});
-      window.open(COURT_AUCTION_SEARCH_URL, "_blank", "noopener");
-      window.alert(
-        "새 창에서 대법원 법원경매정보 '물건상세검색' 화면이 열립니다.\n\n" +
-        "1) 법원: " + (it.법원 || "") + "\n" +
-        "2) 사건번호 탭 → 연도 " + (m ? m[1] : "") + " 선택 → 사건번호란에 붙여넣기 (Ctrl+V, 클립보드에 복사됨: " + copyText + ")\n" +
-        "3) 검색 버튼 클릭 → 물건 클릭 → 매각물건명세서 / 현황조사서 / 감정평가서 버튼 클릭"
-      );
+      if (!it || it.lat == null) { window.alert("이 물건의 위치 좌표를 아직 찾지 못했습니다."); return; }
+      box.classList.add("show");
+      box.innerHTML = "";
+      const rvClient = new kakao.maps.RoadviewClient();
+      const position = new kakao.maps.LatLng(it.lat, it.lng);
+      rvClient.getNearestPanoId(position, 50, (panoId) => {
+        if (panoId == null) {
+          box.innerHTML = '<div class="rv-empty">이 주변에는 로드뷰가 없습니다.</div>';
+          return;
+        }
+        rvInstance = new kakao.maps.Roadview(box);
+        rvInstance.setPanoId(panoId, position);
+      });
     }
+
+    /* ---------- 매각물건명세서 · 현황조사서 · 감정평가서 ---------- */
+    async function openDoc(type) {
+      const it = curDetailItem;
+      const msg = document.getElementById("docMsg");
+      const btn = document.getElementById("docBtn_" + type);
+      if (!it) return;
+      if (!it.cortOfcCd || !it.saNo) {
+        msg.textContent = "이 물건은 문서 조회에 필요한 사건 식별정보가 없습니다.";
+        return;
+      }
+      msg.textContent = "";
+      btn.disabled = true;
+      const prevText = btn.textContent;
+      btn.textContent = "조회 중…";
+      try {
+        const params = new URLSearchParams({
+          type,
+          cortOfcCd: it.cortOfcCd,
+          saNo: it.saNo,
+          csNo: it.사건번호,
+          dspslGdsSeq: it.dspslGdsSeq || "1",
+          maeGiil: it.매각기일 || "",
+          cortNm: it.법원 || "",
+        });
+        const res = await fetch("/api/docs?" + params.toString());
+        const json = await res.json();
+        if (!res.ok || json.error) {
+          msg.textContent = json.error || "문서를 불러오지 못했습니다.";
+          return;
+        }
+        if (type === "curst") {
+          renderCurstModal(json.data, it);
+        } else {
+          window.open(json.url, "_blank", "noopener");
+        }
+      } catch (e) {
+        msg.textContent = "요청 중 오류가 발생했습니다: " + e;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
+    }
+
+    function renderCurstModal(data, it) {
+      const info = data?.dma_curstExmnMngInf || {};
+      const objs = data?.dlt_ordTsRlet || [];
+      const lsers = data?.dlt_ordTsLserLtn || [];
+      let html = '<h3>현황조사서 · ' + (it.사건번호 || "") + '</h3>';
+      html += '<div class="sec-h">기본정보</div>';
+      html += '<table><tr><th>조사일시</th><td>' + (info.exmnDtDts || "-") + '</td></tr></table>';
+      html += '<div class="sec-h">부동산의 현황 및 점유관계</div>';
+      html += '<table>';
+      objs.forEach(o => {
+        html += '<tr><th>소재지</th><td>' + (o.printSt || "") + '</td></tr>';
+        html += '<tr><th>점유관계</th><td>' + (o.auctnPossRltnCd === "02" ? "임차인(별지)점유" : (o.auctnPossRltnCd || "-")) + '</td></tr>';
+        html += '<tr><th>현황</th><td>' + (o.gdsPossCtt || "-").replace(/<br\s*\/?>/g, "<br>") + '</td></tr>';
+      });
+      html += '</table>';
+      if (lsers.length) {
+        html += '<div class="sec-h">임대차관계 조사서</div><table>';
+        lsers.forEach(l => {
+          html += '<tr><th>점유인</th><td>' + (l.intrpsNm || "-") + '</td></tr>';
+          html += '<tr><th>전입일자</th><td>' + (l.mvinDtlCtt || "-") + '</td></tr>';
+        });
+        html += '</table>';
+      }
+      document.getElementById("docModalBody").innerHTML = html;
+      document.getElementById("docModal").classList.add("show");
+    }
+    function closeDocModal() { document.getElementById("docModal").classList.remove("show"); }
 
     function showOverlay(title, msg) {
       const g = document.createElement("div"); g.className = "overlay-msg";
