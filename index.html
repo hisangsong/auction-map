@@ -254,7 +254,10 @@
       if (원 >= 1e4) return Math.round(원/1e4).toLocaleString() + "만";
       return 원.toLocaleString();
     }
-    function 지역라벨() { return curFavOnly ? "관심목록" : curSido + (curGu === "전체" ? " 전체" : " " + curGu); }
+    function 지역라벨() {
+      if (mapSearchActive) return "지도 영역 내";
+      return curFavOnly ? "관심목록" : curSido + (curGu === "전체" ? " 전체" : " " + curGu);
+    }
 
     function loadKakao() {
       const s = document.createElement("script");
@@ -372,24 +375,32 @@
       });
     }
 
-    /* 구·용도·유찰횟수·금액으로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
-    async function apply() {
-      buildFilters();
-      buildYuchalFilters();
+    // 용도·유찰횟수·금액·관심목록 조건(+원하면 시/도·구)으로 물건을 거른다.
+    // 지도내 재검색(researchInMapBounds)은 시/도 조건 없이 전국을 대상으로 쓴다.
+    function buildFilteredItems(opts) {
+      const includeSido = !opts || opts.includeSido !== false;
       const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
-      let all = DATA.items
+      let items = DATA.items
         .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; });
       if (curFavOnly) {
-        all = all.filter(it => isFav(it));
+        items = items.filter(it => isFav(it));
       } else {
-        all = all
-          .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
+        items = items
+          .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
           .filter(it => curType === "전체" || it.분류 === curType)
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
           .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
       }
-      lastAllItems = all;
+      return items;
+    }
+
+    /* 구·용도·유찰횟수·금액으로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
+    async function apply() {
+      buildFilters();
+      buildYuchalFilters();
+      mapSearchActive = false;
       document.getElementById("mapResearchBtn").hidden = true;
+      const all = buildFilteredItems();
       lastTotal = all.length;
       shown = capByRegion(all, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
@@ -460,10 +471,9 @@
     }
 
     /* ---------- 지도내 재검색 ---------- */
-    // apply()가 필터링해 만든 전체 후보(all, CAP 적용 전)를 기억해뒀다가,
-    // 사용자가 지도를 움직인 뒤 "이 지역에서 재검색"을 누르면 그 후보 중
-    // 현재 지도 화면 안에 들어오는 물건을 찾아 보여준다.
-    let lastAllItems = [];
+    // 시/도·구 드롭다운과 무관하게, 지도에 지금 보이는 화면 안의 물건을 전국
+    // 대상으로 찾는다. 지도가 곧 지역 조건이므로 시/도 필터는 적용하지 않는다.
+    let mapSearchActive = false;
     let suppressMapMoveEvent = false;
     const MAP_RESEARCH_MAX_GEOCODE = 200; // 재검색 시 추가로 좌표를 구할 최대 물건 수(비용 고려)
 
@@ -471,6 +481,35 @@
       const showBtn = () => { if (!suppressMapMoveEvent) document.getElementById("mapResearchBtn").hidden = false; };
       kakao.maps.event.addListener(map, "dragend", showBtn);
       kakao.maps.event.addListener(map, "zoom_changed", showBtn);
+    }
+
+    // 전국 대상이라 지오코딩 예산(MAP_RESEARCH_MAX_GEOCODE)을 아무 순서로나 쓰면
+    // 지도가 보고 있는 지역과 먼 물건에 예산이 낭비될 수 있다. 지도 중심의
+    // 행정구역을 먼저 알아내(coord2RegionCode), 같은 시군구 → 같은 시/도 → 나머지
+    // 순으로 지오코딩을 시도하도록 우선순위를 매긴다.
+    function coord2Region(lng, lat) {
+      return new Promise(resolve => {
+        const geocoder = new kakao.maps.services.Geocoder();
+        geocoder.coord2RegionCode(lng, lat, (result, status) => {
+          if (status === kakao.maps.services.Status.OK) {
+            resolve(result.find(r => r.region_type === "H") || result[0] || null);
+          } else {
+            resolve(null);
+          }
+        });
+      });
+    }
+
+    function prioritizeByRegion(items, region) {
+      if (!region) return items;
+      const sameGu = [], sameSido = [], rest = [];
+      items.forEach(it => {
+        if (it.lat != null) { rest.push(it); return; } // 이미 좌표 있으면 예산이 안 드니 순서 무관
+        if (it.시군구 === region.region_2depth_name) sameGu.push(it);
+        else if (it.시도 === region.region_1depth_name) sameSido.push(it);
+        else rest.push(it);
+      });
+      return [...sameGu, ...sameSido, ...rest];
     }
 
     async function researchInMapBounds() {
@@ -481,9 +520,13 @@
       const prevText = btn.textContent;
       btn.textContent = "검색 중…";
       try {
+        const center = map.getCenter();
+        const region = await coord2Region(center.getLng(), center.getLat());
+        const candidates = prioritizeByRegion(buildFilteredItems({ includeSido: false }), region);
+
         const matched = [];
         let geocodedCount = 0;
-        for (const it of lastAllItems) {
+        for (const it of candidates) {
           if (it.lat == null) {
             if (geocodedCount >= MAP_RESEARCH_MAX_GEOCODE) continue;
             const r = await geocodeP(it.소재지, 2);
@@ -494,6 +537,7 @@
         }
         activeIdx = -1;
         closeDetail();
+        mapSearchActive = true;
         lastTotal = matched.length;
         shown = matched;
         render(false);
