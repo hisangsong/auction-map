@@ -35,6 +35,16 @@
     .price-dd-panel label:hover { background:rgba(148,163,184,0.12); }
     .price-dd-panel input[type="checkbox"] { accent-color:var(--accent); cursor:pointer; }
     .price-dd-panel hr { border:none; border-top:1px solid var(--line); margin:4px 0; }
+    .fav-toggle { font-family:inherit; font-size:13px; color:var(--text); background:var(--panel2);
+      border:1px solid var(--line); padding:7px 12px; border-radius:8px; cursor:pointer; white-space:nowrap; }
+    .fav-toggle.active { background:#fbbf24; border-color:#fbbf24; color:#0f172a; font-weight:700; }
+    .fav-star { font-family:inherit; font-size:16px; line-height:1; color:var(--muted); background:none;
+      border:none; cursor:pointer; padding:2px 4px; margin-left:auto; }
+    .fav-star:hover { color:#fbbf24; }
+    .fav-star.active { color:#fbbf24; }
+    .fav-star-detail { font-family:inherit; font-size:13px; font-weight:600; color:#0f172a; background:#fbbf24;
+      border:none; border-radius:10px; padding:9px 8px; cursor:pointer; width:100%; margin-top:10px; }
+    .fav-star-detail.active { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
     .filters { display:flex; gap:7px; margin-left:auto; flex-wrap:wrap; }
     .filters button { font-family:inherit; font-size:13px; cursor:pointer; color:var(--muted);
       background:var(--panel2); border:1px solid var(--line); padding:6px 12px; border-radius:999px; transition:all .15s; }
@@ -119,6 +129,7 @@
       <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
       <div class="price-dd-panel" id="priceDdPanel"></div>
     </div>
+    <button type="button" class="fav-toggle" id="favToggleBtn"></button>
     <div class="filters" id="filters"></div>
     <div class="filters" id="yuchalFilters"></div>
   </header>
@@ -161,7 +172,34 @@
       { label: "10억 이상", min: 1e9, max: Infinity },
     ];
 
-    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), activeIdx = -1, lastTotal = 0;
+    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
+
+    /* ---------- 관심목록 (localStorage) ---------- */
+    const FAV_KEY = "auctionFavorites";
+    function loadFavorites() {
+      try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || "[]")); }
+      catch (e) { return new Set(); }
+    }
+    let favorites = loadFavorites();
+    function saveFavorites() {
+      try { localStorage.setItem(FAV_KEY, JSON.stringify([...favorites])); } catch (e) {}
+    }
+    function favKey(it) { return it.고유번호 || (it.사건번호 + "|" + it.소재지); }
+    function isFav(it) { return favorites.has(favKey(it)); }
+    function toggleFav(it) {
+      if (!it) return;
+      const k = favKey(it);
+      if (favorites.has(k)) favorites.delete(k); else favorites.add(k);
+      saveFavorites();
+      updateFavToggleLabel();
+      if (curDetailItem === it) showDetail(it);
+      apply();
+    }
+    function updateFavToggleLabel() {
+      const btn = document.getElementById("favToggleBtn");
+      btn.textContent = "★ 관심목록" + (favorites.size ? " (" + favorites.size + ")" : "");
+      btn.classList.toggle("active", curFavOnly);
+    }
 
     function 분류(용도) {
       const u = 용도 || "";
@@ -184,7 +222,7 @@
       if (원 >= 1e4) return Math.round(원/1e4).toLocaleString() + "만";
       return 원.toLocaleString();
     }
-    function 지역라벨() { return curSido + (curGu === "전체" ? " 전체" : " " + curGu); }
+    function 지역라벨() { return curFavOnly ? "관심목록" : curSido + (curGu === "전체" ? " 전체" : " " + curGu); }
 
     function loadKakao() {
       const s = document.createElement("script");
@@ -208,7 +246,20 @@
       curGu = "전체";
       document.getElementById("guSel").value = curGu;
       buildPriceSelect();
+      document.getElementById("favToggleBtn").onclick = () => {
+        curFavOnly = !curFavOnly;
+        activeIdx = -1; closeDetail(); updateFavToggleLabel(); updateFilterControlsDisabled(); apply();
+      };
+      updateFavToggleLabel();
       apply();
+    }
+
+    function updateFilterControlsDisabled() {
+      ["sidoSel", "guSel", "priceDd", "filters", "yuchalFilters"].forEach(id => {
+        const el = document.getElementById(id);
+        el.style.opacity = curFavOnly ? .4 : 1;
+        el.style.pointerEvents = curFavOnly ? "none" : "";
+      });
     }
 
     function buildSidoSelect() {
@@ -293,12 +344,17 @@
       buildFilters();
       buildYuchalFilters();
       const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
-      const all = DATA.items
-        .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
-        .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; })
-        .filter(it => curType === "전체" || it.분류 === curType)
-        .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
-        .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
+      let all = DATA.items
+        .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; });
+      if (curFavOnly) {
+        all = all.filter(it => isFav(it));
+      } else {
+        all = all
+          .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
+          .filter(it => curType === "전체" || it.분류 === curType)
+          .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
+          .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
+      }
       lastTotal = all.length;
       shown = all.slice(0, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
@@ -334,11 +390,13 @@
         el.className = "item" + (i === activeIdx ? " active" : "");
         el.innerHTML =
           '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
-          '<span class="meta">'+it.용도+'</span></div>'+
+          '<span class="meta">'+it.용도+'</span>'+
+          '<button class="fav-star'+(isFav(it)?' active':'')+'" title="관심목록">'+(isFav(it)?'★':'☆')+'</button></div>'+
           '<div class="addr">'+it.소재지+'</div>'+
           '<div class="row2"><span class="price">'+억(it.최저가)+' <span class="meta">('+it.최저가율+'%)</span></span>'+
           '<span class="meta">'+it.유찰구분+' · '+it.매각기일+'</span></div>';
         el.onclick = () => selectItem(i);
+        el.querySelector(".fav-star").onclick = (e) => { e.stopPropagation(); toggleFav(it); };
         list.appendChild(el);
       });
     }
@@ -387,6 +445,8 @@
         '<div class="row"><span>매각기일</span><span class="val">'+it.매각기일+'</span></div>'+
         (it.면적구조 ? '<div class="note">📐 '+it.면적구조+'</div>' : '')+
         (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '')+
+        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)">'+
+          (isFav(it)?'★ 관심목록에서 제거':'☆ 관심목록에 추가')+'</button>'+
         '<button class="doc-btn secondary" style="margin-top:14px;width:100%" onclick="toggleRoadview()">🚶 로드뷰 보기</button>'+
         '<div class="rv-box" id="rvBox"></div>'+
         '<div class="doc-buttons">'+
