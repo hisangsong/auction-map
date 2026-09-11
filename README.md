@@ -87,11 +87,13 @@ python build_data.py
 상세 패널의 "🔍 권리분석 (AI)" 버튼은 `/api/analyze` (Vercel 서버리스 함수, `api/analyze.js`)를
 호출한다. 이 함수는 사건상세(`selectAuctnCsSrchRslt.on`, 최선순위 설정일자·별도등기 등 말소되지
 않는 권리)와 현황조사서(`selectCurstExmndc.on`, 점유관계·임차인 전입일자)를 대법원 공개 API에서
-가져와 Claude(`claude-opus-5`)에게 넘기고, 말소기준권리·인수여부·임차인 대항력 등을 정리한
+가져와 Gemini(`gemini-flash-latest`)에게 넘기고, 말소기준권리·인수여부·임차인 대항력 등을 정리한
 분석 결과를 돌려받아 화면에 표시한다.
 
-**필요 설정**: Vercel 프로젝트의 Settings > Environment Variables 에 `ANTHROPIC_API_KEY` 를
-추가해야 이 기능이 동작한다 (키가 없으면 버튼을 눌렀을 때 안내 메시지가 뜬다).
+**필요 설정**: [Google AI Studio](https://aistudio.google.com/apikey)에서 무료로 발급받은 키를
+Vercel 프로젝트의 Settings > Environment Variables 에 `GEMINI_API_KEY` 로 추가해야 이 기능이
+동작한다 (키가 없으면 버튼을 눌렀을 때 안내 메시지가 뜬다). Gemini API 무료 티어는 분당 요청 수
+제한이 있으므로, 개인 프로젝트 수준의 트래픽에서는 과금 없이 사용할 수 있다.
 
 이 분석은 AI가 공개된 정보만으로 생성한 참고 자료이며 법적 자문이 아니다 - 프롬프트에도 이
 문구를 마지막 줄에 반드시 포함하도록 지시해 두었다. 입찰 전 매각물건명세서·감정평가서 원본과
@@ -103,8 +105,7 @@ python build_data.py
 `api/_lib/court.js`)로 이루어져 있다. 지도·목록·필터는 `data.json`만 읽는 정적 페이지이고,
 문서 조회·AI 권리분석 버튼만 서버리스 함수를 탄다.
 
-`package.json`에 `@anthropic-ai/sdk` 의존성이 있으므로, 로컬에서 서버리스 함수를 테스트하려면
-`npm install`이 먼저 필요하다. Vercel은 배포 시 자동으로 `npm install`을 실행한다.
+서버리스 함수는 외부 npm 의존성 없이 Node 내장 `fetch`만 사용한다.
 
 ## 배포
 

@@ -1,17 +1,20 @@
 // Vercel Serverless Function: AI 권리분석
 //
 // 물건의 등기부상 권리관계 요약(사건상세)과 현황조사서(점유관계·임차인 현황)를
-// 대법원 법원경매정보 공개 API에서 가져와 Claude에게 넘기고, 말소기준권리·인수여부·
+// 대법원 법원경매정보 공개 API에서 가져와 Gemini에게 넘기고, 말소기준권리·인수여부·
 // 임차인 대항력 등을 정리한 권리분석 결과를 받아 돌려준다.
 //
-// 필요 환경변수: ANTHROPIC_API_KEY (Vercel 프로젝트 설정 > Environment Variables 에 추가)
+// 필요 환경변수: GEMINI_API_KEY (Vercel 프로젝트 설정 > Environment Variables 에 추가,
+// https://aistudio.google.com/apikey 에서 무료로 발급)
 //
 // POST /api/analyze
 // body: { cortOfcCd, saNo, dspslGdsSeq, 사건번호, 법원, 소재지, 용도, 감정가, 최저가,
 //         최저가율, 유찰, 매각기일, 면적구조, 비고 }
 
-const Anthropic = require("@anthropic-ai/sdk");
 const { getSessionCookie, fetchCaseDetail, fetchCurstExmndc } = require("./_lib/court");
+
+const GEMINI_MODEL = "gemini-flash-latest";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const SYSTEM_PROMPT = `당신은 한국 법원경매 물건의 권리분석을 돕는 보조 도구입니다.
 아래 제공되는 사건 정보(등기부상 권리관계 요약, 현황조사서상 점유관계·임차인 현황, 물건 기본정보)만을
@@ -79,10 +82,10 @@ module.exports = async (req, res) => {
     res.status(405).json({ error: "POST only" });
     return;
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     res
       .status(500)
-      .json({ error: "ANTHROPIC_API_KEY가 설정되어 있지 않습니다. Vercel 프로젝트의 Environment Variables에 추가해주세요." });
+      .json({ error: "GEMINI_API_KEY가 설정되어 있지 않습니다. Vercel 프로젝트의 Environment Variables에 추가해주세요." });
     return;
   }
 
@@ -113,18 +116,24 @@ module.exports = async (req, res) => {
 
     const factsText = buildFactsText(item, caseDetail, curst);
 
-    const anthropic = new Anthropic();
-    const response = await anthropic.messages.create({
-      model: "claude-opus-5",
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: factsText }],
+    const geminiRes = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: factsText }] }],
+      }),
     });
+    const geminiBody = await geminiRes.json();
+    if (!geminiRes.ok) {
+      throw new Error(geminiBody?.error?.message || `Gemini API 오류 (${geminiRes.status})`);
+    }
 
-    const text = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
+    const text = (geminiBody.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "")
+      .join("\n")
+      .trim();
+    if (!text) throw new Error("Gemini 응답에서 분석 결과를 찾을 수 없습니다.");
 
     res.status(200).json({ analysis: text, facts: factsText });
   } catch (e) {
