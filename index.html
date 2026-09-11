@@ -101,6 +101,7 @@
     <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
     <select id="sidoSel"></select>
     <select id="guSel"></select>
+    <select id="priceSel"></select>
     <div class="filters" id="filters"></div>
     <div class="filters" id="yuchalFilters"></div>
   </header>
@@ -132,8 +133,18 @@
     const 색상 = { 아파트:"#2563eb", 주택:"#0891b2", 토지:"#16a34a", 상가:"#ea580c", 기타:"#64748b" };
     const 분류목록 = ["전체","아파트","주택","상가","토지","기타"];
     const 유찰목록 = ["전체","최초","1회유찰","2회유찰","3회이상"];
+    const 금액목록 = [
+      { label: "최저가 전체", min: 0, max: Infinity },
+      { label: "~5천만", min: 0, max: 5e7 },
+      { label: "5천만~1억", min: 5e7, max: 1e8 },
+      { label: "1억~2억", min: 1e8, max: 2e8 },
+      { label: "2억~3억", min: 2e8, max: 3e8 },
+      { label: "3억~5억", min: 3e8, max: 5e8 },
+      { label: "5억~10억", min: 5e8, max: 1e9 },
+      { label: "10억 이상", min: 1e9, max: Infinity },
+    ];
 
-    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", activeIdx = -1, lastTotal = 0;
+    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdx = 0, activeIdx = -1, lastTotal = 0;
 
     function 분류(용도) {
       const u = 용도 || "";
@@ -179,6 +190,7 @@
       buildGuSelect();
       curGu = "전체";
       document.getElementById("guSel").value = curGu;
+      buildPriceSelect();
       apply();
     }
 
@@ -201,6 +213,13 @@
       (DATA.guBySido[curSido] || []).forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
       sel.onchange = () => { curGu = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
+    function buildPriceSelect() {
+      const sel = document.getElementById("priceSel");
+      sel.innerHTML = "";
+      금액목록.forEach((band, i) => { const o = document.createElement("option"); o.value = i; o.textContent = band.label; sel.appendChild(o); });
+      sel.value = curPriceIdx;
+      sel.onchange = () => { curPriceIdx = +sel.value; activeIdx = -1; closeDetail(); apply(); };
+    }
     function buildFilters() {
       const box = document.getElementById("filters"); box.innerHTML = "";
       분류목록.forEach(t => {
@@ -220,15 +239,17 @@
       });
     }
 
-    /* 구·용도·유찰횟수로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
+    /* 구·용도·유찰횟수·금액으로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
     async function apply() {
       buildFilters();
       buildYuchalFilters();
+      const 금액band = 금액목록[curPriceIdx];
       const all = DATA.items
         .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
         .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; })
         .filter(it => curType === "전체" || it.분류 === curType)
-        .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal);
+        .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
+        .filter(it => { const p = it.최저가 || 0; return p >= 금액band.min && p < 금액band.max; });
       lastTotal = all.length;
       shown = all.slice(0, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
