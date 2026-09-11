@@ -158,6 +158,31 @@
     const KAKAO_APP_KEY = "dcbb55fb29c50a738f7b5ea69c035b93";
     const CAP = 80; // 지도에 한 번에 표시할 최대 물건 수(주소변환 부담 고려)
 
+    // 단순히 앞에서 CAP개를 자르면 data.json 순서(법원 코드 순)상 앞쪽 시군구
+    // 물건만 계속 보이는 문제가 있다 (예: "경기도 전체"인데 의정부지방법원
+    // 관할(경기북부) 물건이 항상 먼저 나와 그것만 CAP을 채워버림). 시군구별로
+    // 고르게 한 건씩 돌아가며 뽑아 지역 편중 없이 CAP개를 채운다.
+    function capByRegion(arr, cap) {
+      if (arr.length <= cap) return arr;
+      const groups = {};
+      const order = [];
+      arr.forEach(it => {
+        const k = it.시군구 || "";
+        if (!groups[k]) { groups[k] = []; order.push(k); }
+        groups[k].push(it);
+      });
+      const result = [];
+      for (let i = 0; result.length < cap; i++) {
+        let addedAny = false;
+        for (const k of order) {
+          if (result.length >= cap) break;
+          if (groups[k].length > i) { result.push(groups[k][i]); addedAny = true; }
+        }
+        if (!addedAny) break;
+      }
+      return result;
+    }
+
     const 색상 = { 아파트:"#2563eb", 주택:"#0891b2", 토지:"#16a34a", 상가:"#ea580c", 기타:"#64748b" };
     const 분류목록 = ["전체","아파트","주택","상가","토지","기타"];
     const 유찰목록 = ["전체","최초","1회유찰","2회유찰","3회이상"];
@@ -356,7 +381,7 @@
           .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
       }
       lastTotal = all.length;
-      shown = all.slice(0, CAP);
+      shown = capByRegion(all, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
       document.getElementById("count").textContent = 지역라벨() + " · " + 표시 + " · 위치 찾는 중…";
       renderList();
