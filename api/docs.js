@@ -1,21 +1,22 @@
-// Vercel Serverless Function: 현황조사서 / 감정평가서 프록시
+// Vercel Serverless Function: 현황조사서 / 감정평가서 / 매각물건명세서 요약 프록시
 //
 // 대법원 법원경매정보(courtauction.go.kr)가 물건상세 화면에서 각 문서 버튼을
 // 누를 때 호출하는 것과 동일한 공개 JSON API를 서버에서 대신 호출한다.
 // 브라우저에서 직접 호출하면 CORS로 막히기 때문에 이 프록시가 필요하다.
 //
-// 매각물건명세서는 여기 포함하지 않는다: 그 문서는 courtauction.go.kr 세션과
-// 1:1로 묶인 서명 토큰(encParam)을 발급하는데, 그 토큰은 발급받은 바로 그
-// 브라우저 세션에서만 유효하다. 우리 서버가 발급받은 토큰을 방문자 브라우저가
-// 열면 "로그인 필요" 화면만 뜬다 - README 참고.
+// 매각물건명세서 "원본 PDF"는 여기서 열어줄 수 없다: 그 문서는 courtauction.go.kr
+// 세션과 1:1로 묶인 서명 토큰(encParam)을 쓰는데, 그 토큰은 발급받은 바로 그 브라우저
+// 세션에서만 유효하다 (README 참고). 대신 매각물건명세서를 구성하는 것과 동일한
+// 공개 데이터(사건상세 selectAuctnCsSrchRslt.on + 현황조사서 selectCurstExmndc.on)를
+// 모아 "요약" 형태로 즉시 보여준다 (type=maegak). 법원 발급 원본은 여전히 수동 안내로 연결한다.
 //
-// GET /api/docs?type=curst|aee&cortOfcCd=B000210&saNo=20240130002501
+// GET /api/docs?type=curst|aee|maegak&cortOfcCd=B000210&saNo=20240130002501
 //               &csNo=2024타경2501&dspslGdsSeq=1&maeGiil=2026-09-10&cortNm=서울중앙지방법원
 
-const { UA, getSessionCookie, postOn } = require("./_lib/court");
+const { UA, getSessionCookie, postOn, fetchCaseDetail, fetchCurstExmndc } = require("./_lib/court");
 
 module.exports = async (req, res) => {
-  const { type, cortOfcCd, saNo, csNo, cortNm, maeGiil } = req.query;
+  const { type, cortOfcCd, saNo, csNo, cortNm, maeGiil, dspslGdsSeq } = req.query;
 
   if (!type || !cortOfcCd || !saNo || !csNo) {
     res.status(400).json({ error: "missing required params" });
@@ -27,17 +28,24 @@ module.exports = async (req, res) => {
     const cookie = await getSessionCookie();
 
     if (type === "curst") {
-      const r = await postOn(
-        "/pgj/pgj15B/selectCurstExmndc.on",
-        { dma_srchCurstExmn: { cortOfcCd, csNo, auctnInfOriginDvsCd: "2", ordTsCnt: "" } },
-        cookie,
-        { submissionid: "mf_wfm_mainFrame_curstExmndcPopUp_wframe_sbm_selectCurstExmn" }
-      );
-      if (r.status !== 200) {
-        res.status(404).json({ error: r.message || "현황조사서를 찾을 수 없습니다." });
+      const curst = await fetchCurstExmndc(cookie, { cortOfcCd, csNo });
+      if (!curst) {
+        res.status(404).json({ error: "현황조사서를 찾을 수 없습니다." });
         return;
       }
-      res.status(200).json({ data: r.data });
+      res.status(200).json({ data: curst });
+      return;
+    }
+
+    if (type === "maegak") {
+      let caseDetail = {};
+      try {
+        caseDetail = await fetchCaseDetail(cookie, { cortOfcCd, csNo, dspslGdsSeq: dspslGdsSeq || "1" });
+      } catch {
+        // 사건상세를 못 가져와도 현황조사서만으로 부분 요약은 보여준다.
+      }
+      const curst = await fetchCurstExmndc(cookie, { cortOfcCd, csNo });
+      res.status(200).json({ caseDetail, curst });
       return;
     }
 
