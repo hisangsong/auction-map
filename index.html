@@ -21,6 +21,20 @@
       border:1px solid rgba(52,211,153,0.3); padding:3px 10px; border-radius:999px; white-space:nowrap; }
     select { font-family:inherit; font-size:13px; color:var(--text); background:var(--panel2);
       border:1px solid var(--line); padding:7px 12px; border-radius:8px; cursor:pointer; }
+    .price-dd { position:relative; }
+    .price-dd-btn { font-family:inherit; font-size:13px; color:var(--text); background:var(--panel2);
+      border:1px solid var(--line); padding:7px 12px; border-radius:8px; cursor:pointer; white-space:nowrap;
+      max-width:220px; overflow:hidden; text-overflow:ellipsis; display:inline-flex; align-items:center; gap:6px; }
+    .price-dd-btn::after { content:"▾"; font-size:10px; color:var(--muted); }
+    .price-dd-btn.active { border-color:var(--accent); color:var(--accent); }
+    .price-dd-panel { display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:25; min-width:180px;
+      background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:6px; box-shadow:0 12px 30px rgba(0,0,0,.4); }
+    .price-dd-panel.show { display:block; }
+    .price-dd-panel label { display:flex; align-items:center; gap:8px; font-size:13px; padding:6px 8px;
+      border-radius:6px; cursor:pointer; white-space:nowrap; }
+    .price-dd-panel label:hover { background:rgba(148,163,184,0.12); }
+    .price-dd-panel input[type="checkbox"] { accent-color:var(--accent); cursor:pointer; }
+    .price-dd-panel hr { border:none; border-top:1px solid var(--line); margin:4px 0; }
     .filters { display:flex; gap:7px; margin-left:auto; flex-wrap:wrap; }
     .filters button { font-family:inherit; font-size:13px; cursor:pointer; color:var(--muted);
       background:var(--panel2); border:1px solid var(--line); padding:6px 12px; border-radius:999px; transition:all .15s; }
@@ -101,7 +115,10 @@
     <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
     <select id="sidoSel"></select>
     <select id="guSel"></select>
-    <select id="priceSel"></select>
+    <div class="price-dd" id="priceDd">
+      <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
+      <div class="price-dd-panel" id="priceDdPanel"></div>
+    </div>
     <div class="filters" id="filters"></div>
     <div class="filters" id="yuchalFilters"></div>
   </header>
@@ -144,7 +161,7 @@
       { label: "10억 이상", min: 1e9, max: Infinity },
     ];
 
-    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdx = 0, activeIdx = -1, lastTotal = 0;
+    let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), activeIdx = -1, lastTotal = 0;
 
     function 분류(용도) {
       const u = 용도 || "";
@@ -213,13 +230,45 @@
       (DATA.guBySido[curSido] || []).forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
       sel.onchange = () => { curGu = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
-    function buildPriceSelect() {
-      const sel = document.getElementById("priceSel");
-      sel.innerHTML = "";
-      금액목록.forEach((band, i) => { const o = document.createElement("option"); o.value = i; o.textContent = band.label; sel.appendChild(o); });
-      sel.value = curPriceIdx;
-      sel.onchange = () => { curPriceIdx = +sel.value; activeIdx = -1; closeDetail(); apply(); };
+    function priceDdLabel() {
+      if (curPriceIdxSet.has(0) || curPriceIdxSet.size === 0) return 금액목록[0].label;
+      const picked = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
+      if (picked.length === 1) return picked[0].label;
+      return picked[0].label + " 외 " + (picked.length - 1) + "건";
     }
+    function buildPriceSelect() {
+      const btn = document.getElementById("priceDdBtn");
+      const panel = document.getElementById("priceDdPanel");
+      panel.innerHTML = "";
+      금액목록.forEach((band, i) => {
+        const label = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.value = i; cb.checked = curPriceIdxSet.has(i);
+        cb.onchange = () => {
+          if (i === 0) {
+            if (cb.checked) curPriceIdxSet = new Set([0]);
+            else curPriceIdxSet.delete(0);
+          } else {
+            curPriceIdxSet.delete(0);
+            if (cb.checked) curPriceIdxSet.add(i); else curPriceIdxSet.delete(i);
+          }
+          if (curPriceIdxSet.size === 0) curPriceIdxSet = new Set([0]);
+          buildPriceSelect();
+          activeIdx = -1; closeDetail(); apply();
+        };
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(band.label));
+        panel.appendChild(label);
+        if (i === 0) panel.appendChild(document.createElement("hr"));
+      });
+      btn.textContent = priceDdLabel();
+      btn.classList.toggle("active", !curPriceIdxSet.has(0));
+      btn.onclick = (e) => { e.stopPropagation(); panel.classList.toggle("show"); };
+    }
+    document.addEventListener("click", (e) => {
+      const dd = document.getElementById("priceDd");
+      if (dd && !dd.contains(e.target)) document.getElementById("priceDdPanel").classList.remove("show");
+    });
     function buildFilters() {
       const box = document.getElementById("filters"); box.innerHTML = "";
       분류목록.forEach(t => {
@@ -243,13 +292,13 @@
     async function apply() {
       buildFilters();
       buildYuchalFilters();
-      const 금액band = 금액목록[curPriceIdx];
+      const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
       const all = DATA.items
         .filter(it => it.시도 === curSido && (curGu === "전체" || it.시군구 === curGu))
         .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; })
         .filter(it => curType === "전체" || it.분류 === curType)
         .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
-        .filter(it => { const p = it.최저가 || 0; return p >= 금액band.min && p < 금액band.max; });
+        .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
       lastTotal = all.length;
       shown = all.slice(0, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
