@@ -64,6 +64,11 @@
     .item .price { color:var(--accent); font-weight:700; font-size:15px; }
     .item .meta { font-size:12px; color:var(--muted); }
     #map { flex:1 1 auto; min-width:0; background:#111827; position:relative; }
+    .map-research-btn { position:absolute; top:16px; left:50%; transform:translateX(-50%); z-index:12;
+      font-family:inherit; font-size:13px; font-weight:600; color:#0f172a; background:var(--accent);
+      border:none; border-radius:999px; padding:9px 16px; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.35); }
+    .map-research-btn:hover { filter:brightness(1.05); }
+    .map-research-btn:disabled { opacity:.7; cursor:wait; }
     .price-pill { transform:translate(-50%,-100%); color:#fff; font-size:12px; font-weight:700; padding:5px 10px;
       border-radius:999px; white-space:nowrap; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.4); border:2px solid #fff; position:relative; }
     .price-pill::after { content:""; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
@@ -139,7 +144,9 @@
       <div class="count" id="count">불러오는 중…</div>
       <div id="list"></div>
     </aside>
-    <div id="map"></div>
+    <div id="map">
+      <button type="button" class="map-research-btn" id="mapResearchBtn" onclick="researchInMapBounds()" hidden>🔍 이 지역에서 재검색</button>
+    </div>
   </div>
 
   <div class="detail" id="detail">
@@ -260,6 +267,7 @@
     async function initMap() {
       map = new kakao.maps.Map(document.getElementById("map"), { center:new kakao.maps.LatLng(37.5665,126.9780), level:8 });
       places = new kakao.maps.services.Places();
+      setupMapMoveWatcher();
       try {
         DATA = await (await fetch("data.json")).json();
       } catch (e) { showOverlay("데이터 로딩 실패", "data.json 을 불러오지 못했습니다: " + e); return; }
@@ -380,6 +388,8 @@
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
           .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
       }
+      lastAllItems = all;
+      document.getElementById("mapResearchBtn").hidden = true;
       lastTotal = all.length;
       shown = capByRegion(all, CAP);
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
@@ -426,7 +436,7 @@
       });
     }
 
-    function render() {
+    function render(fitBounds) {
       renderList();
       clearOverlays();
       if (!map) return;
@@ -442,7 +452,58 @@
         const ov = new kakao.maps.CustomOverlay({ position: pos, content: pill, yAnchor: 1 });
         ov.setMap(map); overlays.push(ov); bounds.extend(pos); placed++;
       });
-      if (placed && activeIdx < 0) map.setBounds(bounds);
+      if (placed && activeIdx < 0 && fitBounds !== false) {
+        suppressMapMoveEvent = true;
+        map.setBounds(bounds);
+        setTimeout(() => { suppressMapMoveEvent = false; }, 400);
+      }
+    }
+
+    /* ---------- 지도내 재검색 ---------- */
+    // apply()가 필터링해 만든 전체 후보(all, CAP 적용 전)를 기억해뒀다가,
+    // 사용자가 지도를 움직인 뒤 "이 지역에서 재검색"을 누르면 그 후보 중
+    // 현재 지도 화면 안에 들어오는 물건을 찾아 보여준다.
+    let lastAllItems = [];
+    let suppressMapMoveEvent = false;
+    const MAP_RESEARCH_MAX_GEOCODE = 200; // 재검색 시 추가로 좌표를 구할 최대 물건 수(비용 고려)
+
+    function setupMapMoveWatcher() {
+      const showBtn = () => { if (!suppressMapMoveEvent) document.getElementById("mapResearchBtn").hidden = false; };
+      kakao.maps.event.addListener(map, "dragend", showBtn);
+      kakao.maps.event.addListener(map, "zoom_changed", showBtn);
+    }
+
+    async function researchInMapBounds() {
+      const btn = document.getElementById("mapResearchBtn");
+      if (!map) return;
+      const bounds = map.getBounds();
+      btn.disabled = true;
+      const prevText = btn.textContent;
+      btn.textContent = "검색 중…";
+      try {
+        const matched = [];
+        let geocodedCount = 0;
+        for (const it of lastAllItems) {
+          if (it.lat == null) {
+            if (geocodedCount >= MAP_RESEARCH_MAX_GEOCODE) continue;
+            const r = await geocodeP(it.소재지, 2);
+            geocodedCount++;
+            if (r) { it.lat = r.lat; it.lng = r.lng; } else continue;
+          }
+          if (bounds.contain(new kakao.maps.LatLng(it.lat, it.lng))) matched.push(it);
+        }
+        activeIdx = -1;
+        closeDetail();
+        lastTotal = matched.length;
+        shown = matched;
+        render(false);
+        btn.hidden = true;
+      } catch (e) {
+        window.alert("지도 영역 재검색 중 오류가 발생했습니다: " + e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
     }
 
     let overlays = [];
