@@ -128,6 +128,7 @@
   <header>
     <h1>⚖️ 전국 <span class="dot">법원경매물건</span> 지도</h1>
     <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
+    <select id="srcSel"></select>
     <select id="sidoSel"></select>
     <select id="guSel"></select>
     <div class="price-dd" id="priceDd">
@@ -205,6 +206,8 @@
     ];
 
     let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
+    let curSrc = "경매", onbidLoaded = false, onbidLoading = false;
+    const 구분색 = { 경매:"#38bdf8", 공매:"#a78bfa" };
 
     /* ---------- 관심목록 (localStorage) ---------- */
     const FAV_KEY = "auctionFavorites";
@@ -282,6 +285,7 @@
       curGu = "전체";
       document.getElementById("guSel").value = curGu;
       buildPriceSelect();
+      buildSrcSelect();
       document.getElementById("favToggleBtn").onclick = () => {
         curFavOnly = !curFavOnly;
         activeIdx = -1; closeDetail(); updateFavToggleLabel(); updateFilterControlsDisabled(); apply();
@@ -296,6 +300,63 @@
         el.style.opacity = curFavOnly ? .4 : 1;
         el.style.pointerEvents = curFavOnly ? "none" : "";
       });
+    }
+
+    /* ---------- 구분(경매/공매) ---------- */
+    function buildSrcSelect() {
+      const sel = document.getElementById("srcSel");
+      sel.innerHTML = "";
+      [["경매","⚖️ 경매"], ["공매","🔨 공매"], ["전체","경매+공매"]].forEach(([v, t]) => {
+        const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
+      });
+      sel.value = curSrc;
+      sel.onchange = async () => {
+        curSrc = sel.value;
+        activeIdx = -1; closeDetail();
+        if (curSrc !== "경매") await ensureOnbidLoaded();
+        apply();
+      };
+    }
+
+    // 시/도·시군구 목록을 현재 DATA.items(경매+공매) 기준으로 다시 만든다.
+    function rebuildRegionsFromItems() {
+      const gu = {}; const orderNew = [];
+      DATA.items.forEach(it => {
+        const s = it.시도; if (!s) return;
+        if (!gu[s]) { gu[s] = new Set(); orderNew.push(s); }
+        if (it.시군구) gu[s].add(it.시군구);
+      });
+      const merged = [...DATA.sido];
+      orderNew.forEach(s => { if (!merged.includes(s)) merged.push(s); });
+      DATA.sido = merged;
+      const newGu = {};
+      merged.forEach(s => { newGu[s] = gu[s] ? [...gu[s]].sort() : (DATA.guBySido[s] || []); });
+      DATA.guBySido = newGu;
+    }
+
+    // 공매(온비드) 물건을 한 번만 불러와 DATA.items 에 병합한다.
+    async function ensureOnbidLoaded() {
+      if (onbidLoaded || onbidLoading) return;
+      onbidLoading = true;
+      document.getElementById("count").textContent = "온비드 공매물건 불러오는 중…";
+      try {
+        const json = await (await fetch("/api/onbid?rows=1000")).json();
+        if (json.error === "NO_KEY") {
+          showOverlay("🔑 공매 데이터: API 키 필요",
+            "Vercel 환경변수 <code>DATA_GO_KR_KEY</code> 에 공공데이터포털 인증키를 등록하고 재배포하면 공매물건이 표시됩니다. (경매는 그대로 사용 가능합니다.)");
+          onbidLoading = false; return;
+        }
+        if (json.error) { showOverlay("공매 데이터 오류", json.message || json.error); onbidLoading = false; return; }
+        (json.items || []).forEach(it => DATA.items.push(it));
+        rebuildRegionsFromItems();
+        buildSidoSelect();
+        if (!DATA.sido.includes(curSido)) curSido = DATA.sido[0] || "";
+        document.getElementById("sidoSel").value = curSido;
+        buildGuSelect();
+        document.getElementById("guSel").value = curGu;
+        onbidLoaded = true;
+      } catch (e) { showOverlay("공매 데이터 오류", String(e)); }
+      onbidLoading = false;
     }
 
     function buildSidoSelect() {
@@ -381,11 +442,12 @@
       const includeSido = !opts || opts.includeSido !== false;
       const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
       let items = DATA.items
-        .map(it => { it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; });
+        .map(it => { it.구분 = it.구분 || "경매"; it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; });
       if (curFavOnly) {
         items = items.filter(it => isFav(it));
       } else {
         items = items
+          .filter(it => curSrc === "전체" || it.구분 === curSrc)
           .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
           .filter(it => curType === "전체" || it.분류 === curType)
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
@@ -396,6 +458,7 @@
 
     /* 구·용도·유찰횟수·금액으로 거른 뒤, 좌표를 아직 안 구한 물건만 주소변환 → 렌더 */
     async function apply() {
+      hideOverlay();
       buildFilters();
       buildYuchalFilters();
       mapSearchActive = false;
@@ -436,6 +499,7 @@
         el.className = "item" + (i === activeIdx ? " active" : "");
         el.innerHTML =
           '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
+          (it.구분==="공매" ? '<span class="type-tag" style="background:'+구분색.공매+'">공매</span>' : '')+
           '<span class="meta">'+it.용도+'</span>'+
           '<button class="fav-star'+(isFav(it)?' active':'')+'" title="관심목록">'+(isFav(it)?'★':'☆')+'</button></div>'+
           '<div class="addr">'+it.소재지+'</div>'+
@@ -457,6 +521,7 @@
         const pill = document.createElement("div");
         pill.className = "price-pill" + (i === activeIdx ? " active" : "");
         pill.style.background = 색상[it.분류];
+        if (it.구분 === "공매") { pill.style.borderColor = 구분색.공매; pill.style.borderWidth = "3px"; }
         pill.textContent = 억(it.최저가);
         pill.onclick = () => selectItem(i);
         const pos = new kakao.maps.LatLng(it.lat, it.lng);
@@ -563,6 +628,7 @@
     function showDetail(it) {
       curDetailItem = it;
       const 저감 = it.감정가 ? Math.round((1 - it.최저가/it.감정가) * 100) : 0;
+      if (it.구분 === "공매") { showGonmeDetail(it, 저감); return; }
       document.getElementById("detailBody").innerHTML =
         '<span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
         '<h3>'+it.소재지+'</h3>'+
@@ -592,6 +658,39 @@
       document.getElementById("detail").classList.remove("show");
       activeIdx = -1;
       destroyRoadview();
+    }
+
+    // 공매(온비드) 물건 상세 - 경매 전용 문서/AI 버튼 대신 온비드 정보와 링크를 보여준다.
+    function showGonmeDetail(it, 저감) {
+      const 기간 = (it.입찰시작 || "?") + " ~ " + (it.입찰종료 || "?");
+      document.getElementById("detailBody").innerHTML =
+        '<span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
+        ' <span class="type-tag" style="background:'+구분색.공매+'">공매</span>'+
+        '<h3>'+(it.물건명 || it.소재지)+'</h3>'+
+        '<div class="sub">캠코 온비드 · '+(it.사건번호 || "")+'</div>'+
+        '<div class="row"><span>소재지</span><span class="val">'+it.소재지+'</span></div>'+
+        '<div class="row"><span>용도</span><span class="val">'+it.용도+'</span></div>'+
+        '<div class="row"><span>감정가</span><span class="val">'+억(it.감정가)+'</span></div>'+
+        '<div class="row"><span>최저입찰가</span><span class="val low">'+억(it.최저가)+
+          (저감>0?'<span class="discount">'+저감+'% ↓</span>':'')+'</span></div>'+
+        '<div class="row"><span>처분방식</span><span class="val">'+(it.처분방식 || "-")+'</span></div>'+
+        '<div class="row"><span>입찰기간</span><span class="val">'+기간+'</span></div>'+
+        '<div class="row"><span>상태</span><span class="val">'+(it.상태 || "-")+'</span></div>'+
+        '<div class="row"><span>물건관리번호</span><span class="val">'+(it.사건번호 || "-")+'</span></div>'+
+        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)">'+
+          (isFav(it)?'★ 관심목록에서 제거':'☆ 관심목록에 추가')+'</button>'+
+        '<button class="doc-btn secondary" style="margin-top:14px;width:100%" onclick="toggleRoadview()">🚶 로드뷰 보기</button>'+
+        '<div class="rv-box" id="rvBox"></div>'+
+        '<button class="doc-btn" style="margin-top:10px;width:100%;background:#a78bfa" onclick="openOnbid(curDetailItem)">🔗 온비드에서 보기</button>'+
+        '<div class="doc-msg">온비드 사이트에서 물건관리번호로 검색하면 공고문·감정평가서 등 원본을 볼 수 있습니다.</div>';
+      document.getElementById("detail").classList.add("show");
+    }
+
+    function openOnbid(it) {
+      if (!it) return;
+      const no = it.사건번호 || "";
+      if (navigator.clipboard && no) navigator.clipboard.writeText(no).catch(() => {});
+      window.open("https://www.onbid.co.kr/op/ppa/selectAdvancedSearch.do", "_blank", "noopener");
     }
 
     let curDetailItem = null;
@@ -802,10 +901,12 @@
     function closeDocModal() { document.getElementById("docModal").classList.remove("show"); }
 
     function showOverlay(title, msg) {
-      const g = document.createElement("div"); g.className = "overlay-msg";
+      hideOverlay();
+      const g = document.createElement("div"); g.className = "overlay-msg"; g.id = "overlayMsg";
       g.innerHTML = '<div class="box"><h2>'+title+'</h2><p>'+msg+'</p></div>';
       document.getElementById("map").appendChild(g);
     }
+    function hideOverlay() { document.getElementById("overlayMsg")?.remove(); }
 
     loadKakao();
   </script>
