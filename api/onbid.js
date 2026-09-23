@@ -23,8 +23,13 @@ export default async function handler(req, res) {
   }
   const rows = String(req.query.rows || "1000");
   const page = String(req.query.page || "1");
+  // prptDivCd(재산구분)·pvctTrgtYn(수의계약여부)는 이 API의 필수 파라미터.
+  // 0007 압류재산 + 0005 기타일반재산(부동산 공매 주요 유형), N=경쟁입찰 진행/예정.
+  const prpt = String(req.query.prpt || "0007,0005");
+  const pvct = String(req.query.pvct || "N");
   const url = BASE + "?serviceKey=" + encodeURIComponent(key) +
-    "&numOfRows=" + rows + "&pageNo=" + page + "&resultType=json";
+    "&numOfRows=" + rows + "&pageNo=" + page + "&resultType=json" +
+    "&prptDivCd=" + encodeURIComponent(prpt) + "&pvctTrgtYn=" + pvct;
 
   try {
     const r = await fetch(url);
