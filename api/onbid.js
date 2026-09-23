@@ -1,8 +1,7 @@
 // 캠코 온비드(OnBid) 부동산 공매물건 "목록" API를 대신 호출하는 서버 함수.
-// - 최신(차세대) 온비드 API: https://apis.data.go.kr/B010003/OnbidRlstListSrvc2/getRlstCltrList2
-// - 인증키는 코드가 아니라 Vercel 환경변수(DATA_GO_KR_KEY, Decoding키)에서 읽는다.
-// - 결과(JSON)를 지도 앱(index.html)이 쓰는 아이템 스키마(경매와 동일 필드)로 변환한다.
-// 호출 예: /api/onbid?rows=1000   (debug=1 이면 원본 응답 일부 반환)
+// 최신 온비드 API: https://apis.data.go.kr/B010003/OnbidRlstListSrvc2/getRlstCltrList2 (HTTPS/JSON)
+// 인증키는 Vercel 환경변수(DATA_GO_KR_KEY, Decoding키)에서 읽는다.
+// 전국 물건이 많아(7만+) 시/도 단위로 조회한다: /api/onbid?sido=서울특별시  (debug=1 이면 원본 일부)
 
 const BASE = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2/getRlstCltrList2";
 
@@ -23,13 +22,16 @@ export default async function handler(req, res) {
   }
   const rows = String(req.query.rows || "1000");
   const page = String(req.query.page || "1");
-  // prptDivCd(재산구분)·pvctTrgtYn(수의계약여부)는 이 API의 필수 파라미터.
-  // 0007 압류재산 + 0005 기타일반재산(부동산 공매 주요 유형), N=경쟁입찰 진행/예정.
-  const prpt = String(req.query.prpt || "0007,0005");
-  const pvct = String(req.query.pvct || "N");
-  const url = BASE + "?serviceKey=" + encodeURIComponent(key) +
+  const prpt = String(req.query.prpt || "0007,0005"); // 압류재산+기타일반재산 (필수)
+  const pvct = String(req.query.pvct || "N");          // 경쟁입찰 진행/예정 (필수)
+  const sido = String(req.query.sido || "");
+  const gu = String(req.query.gu || "");
+
+  let url = BASE + "?serviceKey=" + encodeURIComponent(key) +
     "&numOfRows=" + rows + "&pageNo=" + page + "&resultType=json" +
     "&prptDivCd=" + encodeURIComponent(prpt) + "&pvctTrgtYn=" + pvct;
+  if (sido) url += "&lctnSdnm=" + encodeURIComponent(sido);
+  if (gu) url += "&lctnSggnm=" + encodeURIComponent(gu);
 
   try {
     const r = await fetch(url);
@@ -40,7 +42,6 @@ export default async function handler(req, res) {
     try { j = JSON.parse(text); }
     catch (e) { res.status(200).json({ error: "PARSE_FAIL", message: text.slice(0, 300) }); return; }
 
-    // 공공데이터포털 공통 오류(키 미등록/트래픽초과 등) 형식 감지
     const cmm = j.OpenAPI_ServiceResponse?.cmmMsgHeader || j.response?.cmmMsgHeader;
     if (cmm && (cmm.errMsg || cmm.returnAuthMsg)) {
       res.status(200).json({ error: "API_ERROR", code: cmm.returnReasonCode, message: (cmm.returnAuthMsg || cmm.errMsg) });
@@ -51,16 +52,15 @@ export default async function handler(req, res) {
     const body = j.response?.body || j.body || j;
     let arr = body?.items?.item ?? body?.items ?? [];
     if (!Array.isArray(arr)) arr = arr ? [arr] : [];
-
     if (!arr.length && header.resultCode && !["00", "000", "0"].includes(String(header.resultCode))) {
       res.status(200).json({ error: "API_ERROR", code: header.resultCode, message: header.resultMsg || "온비드 API 오류" });
       return;
     }
 
     const num = (v) => { const n = parseInt(String(v ?? "").replace(/[^0-9]/g, ""), 10); return isNaN(n) ? 0 : n; };
-    const ymd = (v) => { const s = String(v ?? ""); return s.length >= 8 ? s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8) : ""; };
+    const ymd = (v) => { const s = String(v ?? ""); if (s.length < 8 || s.startsWith("2999")) return ""; return s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8); };
 
-    const items = arr.map((o) => {
+    const raw = arr.map((o) => {
       const 시도 = normSido(o.lctnSdnm);
       const 시군구 = (o.lctnSggnm || "").trim();
       const 소재지 = (o.onbidCltrNm || [o.lctnSdnm, o.lctnSggnm, o.lctnEmdNm].filter(Boolean).join(" ")).trim();
@@ -88,6 +88,20 @@ export default async function handler(req, res) {
         },
       };
     }).filter(it => it.소재지 && it.시도);
+
+    // 같은 물건(물건관리번호)이 회차별로 여러 건 → 1건으로 합침.
+    // 실제 입찰일이 있는 건 우선, 그다음 최저가가 낮은(=진행된 회차) 건을 남긴다.
+    const byNo = new Map();
+    for (const it of raw) {
+      const k = it.사건번호 || it.고유번호;
+      const cur = byNo.get(k);
+      if (!cur) { byNo.set(k, it); continue; }
+      let keep = cur;
+      if (it.매각기일 && !cur.매각기일) keep = it;
+      else if (!!it.매각기일 === !!cur.매각기일 && it.최저가 > 0 && (cur.최저가 <= 0 || it.최저가 < cur.최저가)) keep = it;
+      byNo.set(k, keep);
+    }
+    const items = [...byNo.values()];
 
     res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate");
     res.status(200).json({ items, total: body?.totalCount ?? items.length });

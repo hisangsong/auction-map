@@ -206,7 +206,7 @@
     ];
 
     let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
-    let curSrc = "경매", onbidLoaded = false, onbidLoading = false;
+    let curSrc = "경매", onbidBySido = {}, onbidError = null;
     const 구분색 = { 경매:"#38bdf8", 공매:"#a78bfa" };
 
     /* ---------- 관심목록 (localStorage) ---------- */
@@ -310,53 +310,20 @@
         const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
       });
       sel.value = curSrc;
-      sel.onchange = async () => {
-        curSrc = sel.value;
-        activeIdx = -1; closeDetail();
-        if (curSrc !== "경매") await ensureOnbidLoaded();
-        apply();
-      };
+      sel.onchange = () => { curSrc = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
 
-    // 시/도·시군구 목록을 현재 DATA.items(경매+공매) 기준으로 다시 만든다.
-    function rebuildRegionsFromItems() {
-      const gu = {}; const orderNew = [];
-      DATA.items.forEach(it => {
-        const s = it.시도; if (!s) return;
-        if (!gu[s]) { gu[s] = new Set(); orderNew.push(s); }
-        if (it.시군구) gu[s].add(it.시군구);
-      });
-      const merged = [...DATA.sido];
-      orderNew.forEach(s => { if (!merged.includes(s)) merged.push(s); });
-      DATA.sido = merged;
-      const newGu = {};
-      merged.forEach(s => { newGu[s] = gu[s] ? [...gu[s]].sort() : (DATA.guBySido[s] || []); });
-      DATA.guBySido = newGu;
-    }
-
-    // 공매(온비드) 물건을 한 번만 불러와 DATA.items 에 병합한다.
-    async function ensureOnbidLoaded() {
-      if (onbidLoaded || onbidLoading) return;
-      onbidLoading = true;
-      document.getElementById("count").textContent = "온비드 공매물건 불러오는 중…";
+    // 선택한 시/도의 공매(온비드) 물건을 불러와 캐시한다. (전국 7만+ → 시/도 단위 조회)
+    async function loadOnbidForSido(sido) {
+      if (!sido) return [];
+      if (onbidBySido[sido]) { onbidError = null; return onbidBySido[sido]; }
       try {
-        const json = await (await fetch("/api/onbid?rows=1000")).json();
-        if (json.error === "NO_KEY") {
-          showOverlay("🔑 공매 데이터: API 키 필요",
-            "Vercel 환경변수 <code>DATA_GO_KR_KEY</code> 에 공공데이터포털 인증키를 등록하고 재배포하면 공매물건이 표시됩니다. (경매는 그대로 사용 가능합니다.)");
-          onbidLoading = false; return;
-        }
-        if (json.error) { showOverlay("공매 데이터 오류", json.message || json.error); onbidLoading = false; return; }
-        (json.items || []).forEach(it => DATA.items.push(it));
-        rebuildRegionsFromItems();
-        buildSidoSelect();
-        if (!DATA.sido.includes(curSido)) curSido = DATA.sido[0] || "";
-        document.getElementById("sidoSel").value = curSido;
-        buildGuSelect();
-        document.getElementById("guSel").value = curGu;
-        onbidLoaded = true;
-      } catch (e) { showOverlay("공매 데이터 오류", String(e)); }
-      onbidLoading = false;
+        const json = await (await fetch("/api/onbid?rows=1000&sido=" + encodeURIComponent(sido))).json();
+        if (json.error) { onbidError = json; onbidBySido[sido] = []; return []; }
+        onbidError = null;
+        onbidBySido[sido] = (json.items || []);
+        return onbidBySido[sido];
+      } catch (e) { onbidError = { message: String(e) }; onbidBySido[sido] = []; return []; }
     }
 
     function buildSidoSelect() {
@@ -441,13 +408,18 @@
     function buildFilteredItems(opts) {
       const includeSido = !opts || opts.includeSido !== false;
       const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
-      let items = DATA.items
+      const 공매현재 = onbidBySido[curSido] || [];
+      let base;
+      if (curFavOnly) base = DATA.items.concat(Object.values(onbidBySido).flat());
+      else if (curSrc === "공매") base = 공매현재;
+      else if (curSrc === "전체") base = DATA.items.concat(공매현재);
+      else base = DATA.items;
+      let items = base
         .map(it => { it.구분 = it.구분 || "경매"; it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; });
       if (curFavOnly) {
         items = items.filter(it => isFav(it));
       } else {
         items = items
-          .filter(it => curSrc === "전체" || it.구분 === curSrc)
           .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
           .filter(it => curType === "전체" || it.분류 === curType)
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
@@ -463,6 +435,13 @@
       buildYuchalFilters();
       mapSearchActive = false;
       document.getElementById("mapResearchBtn").hidden = true;
+      if (curSrc !== "경매" && !curFavOnly) {
+        document.getElementById("count").textContent = "온비드 공매물건 불러오는 중…";
+        await loadOnbidForSido(curSido);
+        if (onbidError) {
+          showOverlay(onbidError.error === "NO_KEY" ? "🔑 공매: API 키 필요" : "공매 데이터 오류", onbidError.message || "");
+        }
+      }
       const all = buildFilteredItems();
       lastTotal = all.length;
       shown = capByRegion(all, CAP);
