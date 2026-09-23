@@ -1,6 +1,7 @@
 {
   "name": "auction-map",
   "private": true,
+  "type": "module",
   "version": "1.0.0",
   "description": "전국 법원경매물건 지도 - 정적 사이트 + 문서조회/AI 권리분석 서버리스 함수"
 }
