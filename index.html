@@ -564,12 +564,11 @@
       const onMove = () => {
         if (suppressMapMoveEvent) return;
         userMovedMap = true;
+        document.getElementById("mapResearchBtn").hidden = false; // 버튼은 항상 보이게
         if (mapSearchActive) {
-          // 지도 검색 모드: 지도를 움직이면 그 영역을 자동으로 다시 검색
+          // 지도 검색 모드: 지도를 움직이면 그 영역을 자동으로도 다시 검색
           clearTimeout(researchTimer);
           researchTimer = setTimeout(() => researchInMapBounds(true), 500);
-        } else {
-          document.getElementById("mapResearchBtn").hidden = false;
         }
       };
       kakao.maps.event.addListener(map, "dragend", onMove);
@@ -636,7 +635,7 @@
         shownNatural = matched;
         applySort();
         render(false);
-        btn.hidden = true;
+        // 버튼은 숨기지 않는다(항상 수동 재검색 가능). 새 필터 조회(apply) 때만 숨김.
       } catch (e) {
         if (!auto) window.alert("지도 영역 재검색 중 오류가 발생했습니다: " + e);
       } finally {
