@@ -559,10 +559,21 @@
     let userMovedMap = false;   // 사용자가 직접 확대/이동했는지 (true면 render가 지도를 되돌리지 않음)
     const MAP_RESEARCH_MAX_GEOCODE = 200; // 재검색 시 추가로 좌표를 구할 최대 물건 수(비용 고려)
 
+    let researchTimer = null, researching = false;
     function setupMapMoveWatcher() {
-      const showBtn = () => { if (!suppressMapMoveEvent) { userMovedMap = true; document.getElementById("mapResearchBtn").hidden = false; } };
-      kakao.maps.event.addListener(map, "dragend", showBtn);
-      kakao.maps.event.addListener(map, "zoom_changed", showBtn);
+      const onMove = () => {
+        if (suppressMapMoveEvent) return;
+        userMovedMap = true;
+        if (mapSearchActive) {
+          // 지도 검색 모드: 지도를 움직이면 그 영역을 자동으로 다시 검색
+          clearTimeout(researchTimer);
+          researchTimer = setTimeout(() => researchInMapBounds(true), 500);
+        } else {
+          document.getElementById("mapResearchBtn").hidden = false;
+        }
+      };
+      kakao.maps.event.addListener(map, "dragend", onMove);
+      kakao.maps.event.addListener(map, "zoom_changed", onMove);
     }
 
     // 전국 대상이라 지오코딩 예산(MAP_RESEARCH_MAX_GEOCODE)을 아무 순서로나 쓰면
@@ -594,13 +605,14 @@
       return [...sameGu, ...sameSido, ...rest];
     }
 
-    async function researchInMapBounds() {
+    async function researchInMapBounds(auto) {
       const btn = document.getElementById("mapResearchBtn");
-      if (!map) return;
+      if (!map || researching) return;
+      researching = true;
       const bounds = map.getBounds();
       btn.disabled = true;
       const prevText = btn.textContent;
-      btn.textContent = "검색 중…";
+      if (!auto) btn.textContent = "검색 중…";
       try {
         const center = map.getCenter();
         const region = await coord2Region(center.getLng(), center.getLat());
@@ -626,10 +638,11 @@
         render(false);
         btn.hidden = true;
       } catch (e) {
-        window.alert("지도 영역 재검색 중 오류가 발생했습니다: " + e);
+        if (!auto) window.alert("지도 영역 재검색 중 오류가 발생했습니다: " + e);
       } finally {
         btn.disabled = false;
         btn.textContent = prevText;
+        researching = false;
       }
     }
 
@@ -639,7 +652,11 @@
     function selectItem(i) {
       activeIdx = i;
       const it = shown[i];
-      if (map && it.lat != null) map.panTo(new kakao.maps.LatLng(it.lat, it.lng));
+      if (map && it.lat != null) {
+        suppressMapMoveEvent = true;
+        map.panTo(new kakao.maps.LatLng(it.lat, it.lng));
+        setTimeout(() => { suppressMapMoveEvent = false; }, 600);
+      }
       showDetail(it); render();
     }
 
