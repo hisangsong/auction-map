@@ -35,6 +35,13 @@ export default async function handler(req, res) {
     try { j = JSON.parse(text); }
     catch (e) { res.status(200).json({ error: "PARSE_FAIL", message: text.slice(0, 300) }); return; }
 
+    // 공공데이터포털 공통 오류(키 미등록/트래픽초과 등) 형식 감지
+    const cmm = j.OpenAPI_ServiceResponse?.cmmMsgHeader || j.response?.cmmMsgHeader;
+    if (cmm && (cmm.errMsg || cmm.returnAuthMsg)) {
+      res.status(200).json({ error: "API_ERROR", code: cmm.returnReasonCode, message: (cmm.returnAuthMsg || cmm.errMsg) });
+      return;
+    }
+
     const header = j.response?.header || j.header || {};
     const body = j.response?.body || j.body || j;
     let arr = body?.items?.item ?? body?.items ?? [];
