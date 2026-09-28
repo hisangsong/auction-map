@@ -13,9 +13,9 @@
 // GET /api/docs?type=curst|aee|maegak&cortOfcCd=B000210&saNo=20240130002501
 //               &csNo=2024타경2501&dspslGdsSeq=1&maeGiil=2026-09-10&cortNm=서울중앙지방법원
 
-const { UA, getSessionCookie, postOn, fetchCaseDetail, fetchCurstExmndc } = require("./_lib/court");
+import { UA, getSessionCookie, postOn, fetchCaseDetail, fetchCurstExmndc } from "./_lib/court.js";
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   const { type, cortOfcCd, saNo, csNo, cortNm, maeGiil, dspslGdsSeq } = req.query;
 
   if (!type || !cortOfcCd || !saNo || !csNo) {
@@ -104,4 +104,4 @@ module.exports = async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: String(e && e.message ? e.message : e) });
   }
-};
+}

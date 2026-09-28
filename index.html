@@ -842,7 +842,7 @@
           msg.textContent = json.error || "권리분석에 실패했습니다.";
           return;
         }
-        renderAnalyzeModal(json.analysis, it);
+        renderAnalyzeModal(json.analysis, it, json.provider);
       } catch (e) {
         msg.textContent = "요청 중 오류가 발생했습니다: " + e;
       } finally {
@@ -851,10 +851,11 @@
       }
     }
 
-    function renderAnalyzeModal(analysis, it) {
+    function renderAnalyzeModal(analysis, it, provider) {
       const escaped = (analysis || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const badge = provider ? '<div class="doc-msg" style="margin:-6px 0 10px;">분석 AI: <b>' + provider + '</b></div>' : '';
       const html =
-        '<h3>🔍 AI 권리분석 · ' + (it.사건번호 || "") + '</h3>' +
+        '<h3>🔍 AI 권리분석 · ' + (it.사건번호 || "") + '</h3>' + badge +
         '<div style="white-space:pre-wrap; font-size:13px; line-height:1.7;">' + escaped + '</div>';
       document.getElementById("docModalBody").innerHTML = html;
       document.getElementById("docModal").classList.add("show");

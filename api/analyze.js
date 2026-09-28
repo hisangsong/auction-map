@@ -1,20 +1,20 @@
 // Vercel Serverless Function: AI 권리분석
 //
 // 물건의 등기부상 권리관계 요약(사건상세)과 현황조사서(점유관계·임차인 현황)를
-// 대법원 법원경매정보 공개 API에서 가져와 Gemini에게 넘기고, 말소기준권리·인수여부·
+// 대법원 법원경매정보 공개 API에서 가져와 AI에게 넘기고, 말소기준권리·인수여부·
 // 임차인 대항력 등을 정리한 권리분석 결과를 받아 돌려준다.
 //
-// 필요 환경변수: GEMINI_API_KEY (Vercel 프로젝트 설정 > Environment Variables 에 추가,
-// https://aistudio.google.com/apikey 에서 무료로 발급)
+// 무료 AI를 폴백 체인으로 사용한다:
+//   1) Google Gemini (GEMINI_API_KEY, https://aistudio.google.com/apikey)
+//   2) Groq (GROQ_API_KEY, https://console.groq.com/keys) - Llama 무료
+// 앞의 것이 한도초과(429)·오류·키없음이면 다음 것으로 자동 전환한다.
 //
-// POST /api/analyze
-// body: { cortOfcCd, saNo, dspslGdsSeq, 사건번호, 법원, 소재지, 용도, 감정가, 최저가,
-//         최저가율, 유찰, 매각기일, 면적구조, 비고 }
+// POST /api/analyze  body: { cortOfcCd, saNo, dspslGdsSeq, 사건번호, ... 물건필드 }
 
-const { getSessionCookie, fetchCaseDetail, fetchCurstExmndc } = require("./_lib/court");
+import { getSessionCookie, fetchCaseDetail, fetchCurstExmndc } from "./_lib/court.js";
 
 const GEMINI_MODEL = "gemini-flash-latest";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 const SYSTEM_PROMPT = `당신은 한국 법원경매 물건의 권리분석을 돕는 보조 도구입니다.
 아래 제공되는 사건 정보(등기부상 권리관계 요약, 현황조사서상 점유관계·임차인 현황, 물건 기본정보)만을
@@ -34,7 +34,6 @@ const SYSTEM_PROMPT = `당신은 한국 법원경매 물건의 권리분석을 �
 function buildFactsText(item, caseDetail, curst) {
   const dxdy = caseDetail?.dspslGdsDxdyInfo || {};
   const lines = [];
-
   lines.push("## 물건 기본정보");
   lines.push(`사건번호: ${item.사건번호 || "-"}`);
   lines.push(`법원: ${item.법원 || "-"}`);
@@ -73,19 +72,63 @@ function buildFactsText(item, caseDetail, curst) {
   } else {
     lines.push("임차인/점유자 정보 없음 (무상 점유 또는 소유자 점유 가능성)");
   }
-
   return lines.join("\n");
 }
 
-module.exports = async (req, res) => {
+// --- 무료 AI 제공자들 (각자 성공 시 텍스트 반환, 실패 시 throw) ---
+async function callGemini(facts) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("GEMINI_API_KEY 없음");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ role: "user", parts: [{ text: facts }] }],
+    }),
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body?.error?.message || `Gemini 오류 (${r.status})`);
+  const text = (body.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("\n").trim();
+  if (!text) throw new Error("Gemini 응답이 비어있음");
+  return { analysis: text, provider: "Gemini", model: GEMINI_MODEL };
+}
+
+async function callGroq(facts) {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new Error("GROQ_API_KEY 없음");
+  const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: facts },
+      ],
+      temperature: 0.3,
+    }),
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body?.error?.message || `Groq 오류 (${r.status})`);
+  const text = (body.choices?.[0]?.message?.content || "").trim();
+  if (!text) throw new Error("Groq 응답이 비어있음");
+  return { analysis: text, provider: "Groq", model: GROQ_MODEL };
+}
+
+// 시도 순서: Gemini → Groq (앞의 것이 실패/한도초과면 다음으로)
+const PROVIDERS = [callGemini, callGroq];
+
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "POST only" });
     return;
   }
-  if (!process.env.GEMINI_API_KEY) {
-    res
-      .status(500)
-      .json({ error: "GEMINI_API_KEY가 설정되어 있지 않습니다. Vercel 프로젝트의 Environment Variables에 추가해주세요." });
+  if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
+    res.status(500).json({
+      error: "AI 키가 없습니다. Vercel 환경변수에 GEMINI_API_KEY 또는 GROQ_API_KEY 중 하나 이상을 추가하세요 (둘 다 무료).",
+    });
     return;
   }
 
@@ -99,44 +142,25 @@ module.exports = async (req, res) => {
 
   try {
     const cookie = await getSessionCookie();
-
     let caseDetail = {};
-    try {
-      caseDetail = await fetchCaseDetail(cookie, { cortOfcCd, csNo, dspslGdsSeq });
-    } catch {
-      // 사건상세를 못 가져와도 현황조사서만으로 부분 분석은 진행한다.
-    }
-
+    try { caseDetail = await fetchCaseDetail(cookie, { cortOfcCd, csNo, dspslGdsSeq }); } catch {}
     let curst = null;
-    try {
-      curst = await fetchCurstExmndc(cookie, { cortOfcCd, csNo });
-    } catch {
-      // 현황조사서가 없을 수도 있다 (조회 가능 기간이 아니거나 대상이 아닌 경우).
-    }
+    try { curst = await fetchCurstExmndc(cookie, { cortOfcCd, csNo }); } catch {}
 
     const factsText = buildFactsText(item, caseDetail, curst);
 
-    const geminiRes = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: "user", parts: [{ text: factsText }] }],
-      }),
-    });
-    const geminiBody = await geminiRes.json();
-    if (!geminiRes.ok) {
-      throw new Error(geminiBody?.error?.message || `Gemini API 오류 (${geminiRes.status})`);
+    const errors = [];
+    for (const provider of PROVIDERS) {
+      try {
+        const out = await provider(factsText);
+        res.status(200).json({ analysis: out.analysis, provider: out.provider, model: out.model, facts: factsText });
+        return;
+      } catch (e) {
+        errors.push(String(e && e.message ? e.message : e));
+      }
     }
-
-    const text = (geminiBody.candidates?.[0]?.content?.parts || [])
-      .map((p) => p.text || "")
-      .join("\n")
-      .trim();
-    if (!text) throw new Error("Gemini 응답에서 분석 결과를 찾을 수 없습니다.");
-
-    res.status(200).json({ analysis: text, facts: factsText });
+    res.status(502).json({ error: "AI 분석 실패 (모든 제공자 오류): " + errors.join(" / ") });
   } catch (e) {
     res.status(500).json({ error: String(e && e.message ? e.message : e) });
   }
-};
+}

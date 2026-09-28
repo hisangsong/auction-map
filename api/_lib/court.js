@@ -148,7 +148,7 @@ async function fetchCurstExmndc(cookie, { cortOfcCd, csNo }) {
   return r.data || null;
 }
 
-module.exports = {
+export {
   BASE,
   SEARCH_PAGE,
   UA,
