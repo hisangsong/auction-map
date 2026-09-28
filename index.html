@@ -560,12 +560,14 @@
       const withPos = shown.map((it, i) => ({ it, i })).filter(o => o.it.lat != null);
       withPos.forEach(o => bounds.extend(new kakao.maps.LatLng(o.it.lat, o.it.lng)));
 
-      // 화면 픽셀 격자로 근접 마커를 군집화 (줌 무관). 선택 물건은 항상 핀으로.
+      // 많이 축소했을 때만(지도 레벨이 높을 때) 근접 마커를 군집화한다.
+      // 평소 줌에서는 개별 핀으로 두어 탭하면 상세가 바로 열리게 한다.
       const CELL = 66;
+      const doCluster = map.getLevel() >= 10;
       let proj = null; try { proj = map.getProjection(); } catch (e) {}
       const cells = {}, singles = [];
       withPos.forEach(o => {
-        if (o.i === activeIdx || !proj) { singles.push(o); return; }
+        if (o.i === activeIdx || !proj || !doCluster) { singles.push(o); return; }
         let px; try { px = proj.containerPointFromCoords(new kakao.maps.LatLng(o.it.lat, o.it.lng)); } catch (e) { px = null; }
         if (!px) { singles.push(o); return; }
         const key = Math.floor(px.x / CELL) + "_" + Math.floor(px.y / CELL);
