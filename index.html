@@ -738,7 +738,17 @@
       }
       const q = encodeURIComponent((it.소재지 || it.물건명 || "") + " 실거래가");
       h += '<button class="doc-btn secondary" style="margin-top:6px;width:100%" onclick="window.open(\'https://search.naver.com/search.naver?query=' + q + '\',\'_blank\',\'noopener\')">💹 주변 시세 검색 (네이버)</button>';
+      h += '<div style="display:flex;gap:6px;margin-top:6px;">' +
+           '<button class="doc-btn secondary" style="flex:1;font-size:11px;" onclick="openRefSite(\'iros\')">📕 등기부 열람</button>' +
+           '<button class="doc-btn secondary" style="flex:1;font-size:11px;" onclick="openRefSite(\'eum\')">🗺️ 토지이용계획</button></div>';
       return h;
+    }
+    // 소재지를 복사하고 등기부(인터넷등기소)·토지이용계획(토지이음)을 새 창으로 연다.
+    function openRefSite(kind) {
+      const it = curDetailItem; if (!it) return;
+      if (navigator.clipboard && it.소재지) navigator.clipboard.writeText(it.소재지).catch(() => {});
+      const urls = { iros: "https://www.iros.go.kr/PMainJ.jsp", eum: "https://www.eum.go.kr/web/ar/lu/luLandForm.jsp" };
+      window.open(urls[kind] || "https://www.iros.go.kr", "_blank", "noopener");
     }
     function updateBidCalc() {
       const it = curDetailItem; if (!it) return;
