@@ -165,7 +165,7 @@
       <div id="list"></div>
     </aside>
     <div id="map">
-      <button type="button" class="map-research-btn" id="mapResearchBtn" onclick="researchInMapBounds()" hidden>🔍 이 지역에서 재검색</button>
+      <button type="button" class="map-research-btn" id="mapResearchBtn" onclick="researchInMapBounds()">🔍 이 지역에서 재검색</button>
     </div>
   </div>
 
@@ -454,7 +454,7 @@
       buildYuchalFilters();
       mapSearchActive = false;
       userMovedMap = false;   // 새 필터 조회이므로 결과에 맞춰 한 번 재fit 허용
-      document.getElementById("mapResearchBtn").hidden = true;
+      document.getElementById("mapResearchBtn").hidden = false; // 버튼은 항상 표시
       if (curSrc !== "경매" && !curFavOnly) {
         document.getElementById("count").textContent = "온비드 공매물건 불러오는 중…";
         await loadOnbidForSido(curSido);
