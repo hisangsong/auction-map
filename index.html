@@ -659,6 +659,66 @@
       showDetail(it); render();
     }
 
+    /* ---------- 입찰 판단 도우미 (전문가용) ---------- */
+    function parseSqm(면적구조) {
+      const m = (면적구조 || "").match(/([\d,]+(?:\.\d+)?)\s*(?:㎡|m2|㎥)/);
+      return m ? parseFloat(m[1].replace(/,/g, "")) : 0;
+    }
+    function dday(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr + "T00:00:00");
+      if (isNaN(d)) return null;
+      return Math.ceil((d - new Date(new Date().toDateString())) / 86400000);
+    }
+    function acqTaxRate(분류, price) { // 취득세율(참고 추정치)
+      if (분류 === "아파트" || 분류 === "주택") {
+        if (price <= 6e8) return 0.011;      // 6억 이하 주택
+        if (price <= 9e8) return 0.022;      // 6~9억
+        return 0.035;                        // 9억 초과
+      }
+      return 0.046;                          // 상가·토지·기타(4.6%)
+    }
+    function costBreakdown(price, 분류) {
+      const 취득세 = Math.round(price * acqTaxRate(분류, price));
+      const 등기법무 = Math.round(price * 0.006);   // 등기수수료·채권·법무사 대략
+      const 명도 = 2000000;                          // 명도/이사비 추정(경매)
+      return { 취득세, 등기법무, 명도, 총: price + 취득세 + 등기법무 + 명도 };
+    }
+    function fmtWon(n) { return (n || 0).toLocaleString() + "원"; }
+    function bidHelperHtml(it) {
+      const sqm = parseSqm(it.면적구조);
+      const py = sqm ? sqm / 3.305785 : 0;
+      const dd = dday(it.매각기일);
+      const p0 = it.최저가 || 0;
+      let h = '<div class="sec-h" style="margin-top:16px;">📊 입찰 판단 도우미</div><div>';
+      if (sqm) h += '<div class="row"><span>면적</span><span class="val">' + sqm.toFixed(1) + '㎡ (' + py.toFixed(1) + '평)</span></div>';
+      if (sqm && p0) h += '<div class="row"><span>평당 최저가</span><span class="val">' + 억(Math.round(p0 / py)) + '</span></div>';
+      if (dd != null) h += '<div class="row"><span>매각기일까지</span><span class="val">' + (dd > 0 ? 'D-' + dd : dd === 0 ? 'D-DAY' : Math.abs(dd) + '일 경과') + '</span></div>';
+      h += '</div>';
+      h += '<div style="font-size:12px;color:var(--muted);margin:8px 0 4px;">입찰가 입력 → 총 취득원가 계산</div>';
+      h += '<input id="bidInput" type="number" value="' + p0 + '" oninput="updateBidCalc()" ' +
+           'style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;">';
+      h += '<div id="bidCalcResult" style="margin-top:8px;"></div>';
+      h += '<div class="doc-msg">※ 취득세·등기·명도비는 참고 추정치입니다.</div>';
+      const q = encodeURIComponent((it.소재지 || it.물건명 || "") + " 실거래가");
+      h += '<button class="doc-btn secondary" style="margin-top:6px;width:100%" onclick="window.open(\'https://search.naver.com/search.naver?query=' + q + '\',\'_blank\',\'noopener\')">💹 주변 시세 검색 (네이버)</button>';
+      return h;
+    }
+    function updateBidCalc() {
+      const it = curDetailItem; if (!it) return;
+      const el = document.getElementById("bidInput"); if (!el) return;
+      const price = parseInt(el.value || "0", 10) || 0;
+      const c = costBreakdown(price, it.분류);
+      const 감정 = it.감정가 || 0;
+      const 대비 = 감정 ? Math.round((1 - price / 감정) * 100) : null;
+      document.getElementById("bidCalcResult").innerHTML =
+        '<div class="row"><span>취득세(추정)</span><span class="val">' + fmtWon(c.취득세) + '</span></div>' +
+        '<div class="row"><span>등기·법무(추정)</span><span class="val">' + fmtWon(c.등기법무) + '</span></div>' +
+        '<div class="row"><span>명도비(추정)</span><span class="val">' + fmtWon(c.명도) + '</span></div>' +
+        '<div class="row"><span>총 취득원가</span><span class="val low">' + 억(c.총) + '</span></div>' +
+        (대비 != null ? '<div class="row"><span>감정가 대비</span><span class="val">' + Math.abs(대비) + '% ' + (대비 >= 0 ? '저가' : '고가') + '</span></div>' : '');
+    }
+
     function showDetail(it) {
       curDetailItem = it;
       const 저감 = it.감정가 ? Math.round((1 - it.최저가/it.감정가) * 100) : 0;
@@ -675,7 +735,8 @@
         '<div class="row"><span>매각기일</span><span class="val">'+it.매각기일+'</span></div>'+
         (it.면적구조 ? '<div class="note">📐 '+it.면적구조+'</div>' : '')+
         (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '')+
-        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)">'+
+        bidHelperHtml(it)+
+        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)" style="margin-top:14px;">'+
           (isFav(it)?'★ 관심목록에서 제거':'☆ 관심목록에 추가')+'</button>'+
         '<button class="doc-btn secondary" style="margin-top:14px;width:100%" onclick="toggleRoadview()">🚶 로드뷰 보기</button>'+
         '<div class="rv-box" id="rvBox"></div>'+
@@ -687,6 +748,7 @@
         '<button class="doc-btn" id="docBtn_analyze" style="margin-top:6px;width:100%;background:#a78bfa" onclick="openAnalyze()">🔍 권리분석 (AI)</button>'+
         '<div class="doc-msg" id="docMsg"></div>';
       document.getElementById("detail").classList.add("show");
+      updateBidCalc();
     }
     function closeDetail() {
       document.getElementById("detail").classList.remove("show");
@@ -711,13 +773,15 @@
         '<div class="row"><span>입찰기간</span><span class="val">'+기간+'</span></div>'+
         '<div class="row"><span>상태</span><span class="val">'+(it.상태 || "-")+'</span></div>'+
         '<div class="row"><span>물건관리번호</span><span class="val">'+(it.사건번호 || "-")+'</span></div>'+
-        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)">'+
+        bidHelperHtml(it)+
+        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)" style="margin-top:14px;">'+
           (isFav(it)?'★ 관심목록에서 제거':'☆ 관심목록에 추가')+'</button>'+
         '<button class="doc-btn secondary" style="margin-top:14px;width:100%" onclick="toggleRoadview()">🚶 로드뷰 보기</button>'+
         '<div class="rv-box" id="rvBox"></div>'+
         '<button class="doc-btn" style="margin-top:10px;width:100%;background:#a78bfa" onclick="openOnbid(curDetailItem)">🔗 온비드에서 보기</button>'+
         '<div class="doc-msg">온비드 사이트에서 물건관리번호로 검색하면 공고문·감정평가서 등 원본을 볼 수 있습니다.</div>';
       document.getElementById("detail").classList.add("show");
+      updateBidCalc();
     }
 
     function openOnbid(it) {
