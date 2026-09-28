@@ -75,6 +75,9 @@
     .price-pill::after { content:""; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
       border-left:6px solid transparent; border-right:6px solid transparent; border-top:7px solid #fff; }
     .price-pill.active { transform:translate(-50%,-100%) scale(1.15); z-index:10; }
+    .cluster { transform:translate(-50%,-50%); width:42px; height:42px; border-radius:50%;
+      background:rgba(56,189,248,.92); color:#0f172a; font-weight:700; font-size:13px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.45); }
     .detail { position:absolute; left:356px; bottom:20px; width:330px; background:var(--panel);
       border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:0 20px 50px rgba(0,0,0,.5);
       z-index:20; display:none; max-height:75%; overflow-y:auto; }
@@ -537,24 +540,54 @@
       });
     }
 
+    function makePill(it, i) {
+      const pill = document.createElement("div");
+      pill.className = "price-pill" + (i === activeIdx ? " active" : "");
+      pill.style.background = 색상[it.분류];
+      if (it.구분 === "공매") { pill.style.borderColor = 구분색.공매; pill.style.borderWidth = "3px"; }
+      pill.textContent = 억(it.최저가);
+      pill.onclick = () => selectItem(i);
+      const ov = new kakao.maps.CustomOverlay({ position: new kakao.maps.LatLng(it.lat, it.lng), content: pill, yAnchor: 1 });
+      ov.setMap(map); overlays.push(ov);
+    }
+
     function render(fitBounds) {
       renderList();
       clearOverlays();
       if (!map) return;
-      const bounds = new kakao.maps.LatLngBounds(); let placed = 0;
-      shown.forEach((it, i) => {
-        if (it.lat == null) return;
-        const pill = document.createElement("div");
-        pill.className = "price-pill" + (i === activeIdx ? " active" : "");
-        pill.style.background = 색상[it.분류];
-        if (it.구분 === "공매") { pill.style.borderColor = 구분색.공매; pill.style.borderWidth = "3px"; }
-        pill.textContent = 억(it.최저가);
-        pill.onclick = () => selectItem(i);
-        const pos = new kakao.maps.LatLng(it.lat, it.lng);
-        const ov = new kakao.maps.CustomOverlay({ position: pos, content: pill, yAnchor: 1 });
-        ov.setMap(map); overlays.push(ov); bounds.extend(pos); placed++;
+      const bounds = new kakao.maps.LatLngBounds();
+      const withPos = shown.map((it, i) => ({ it, i })).filter(o => o.it.lat != null);
+      withPos.forEach(o => bounds.extend(new kakao.maps.LatLng(o.it.lat, o.it.lng)));
+
+      // 화면 픽셀 격자로 근접 마커를 군집화 (줌 무관). 선택 물건은 항상 핀으로.
+      const CELL = 66;
+      let proj = null; try { proj = map.getProjection(); } catch (e) {}
+      const cells = {}, singles = [];
+      withPos.forEach(o => {
+        if (o.i === activeIdx || !proj) { singles.push(o); return; }
+        let px; try { px = proj.containerPointFromCoords(new kakao.maps.LatLng(o.it.lat, o.it.lng)); } catch (e) { px = null; }
+        if (!px) { singles.push(o); return; }
+        const key = Math.floor(px.x / CELL) + "_" + Math.floor(px.y / CELL);
+        (cells[key] = cells[key] || []).push(o);
       });
-      if (placed && activeIdx < 0 && fitBounds !== false && !userMovedMap) {
+      Object.values(cells).forEach(group => {
+        if (group.length === 1) { singles.push(group[0]); return; }
+        const lat = group.reduce((s, o) => s + o.it.lat, 0) / group.length;
+        const lng = group.reduce((s, o) => s + o.it.lng, 0) / group.length;
+        const el = document.createElement("div"); el.className = "cluster"; el.textContent = group.length;
+        el.onclick = () => {
+          suppressMapMoveEvent = true;
+          const c = new kakao.maps.LatLng(lat, lng);
+          map.setLevel(Math.max(1, map.getLevel() - 2), { anchor: c });
+          map.panTo(c);
+          setTimeout(() => { suppressMapMoveEvent = false; if (mapSearchActive) researchInMapBounds(true); else render(false); }, 450);
+        };
+        const ov = new kakao.maps.CustomOverlay({ position: new kakao.maps.LatLng(lat, lng), content: el });
+        ov.setMap(map); overlays.push(ov);
+      });
+      singles.forEach(o => makePill(o.it, o.i));
+
+      if (withPos.length && activeIdx < 0 && fitBounds !== false && !userMovedMap) {
         suppressMapMoveEvent = true;
         map.setBounds(bounds);
         setTimeout(() => { suppressMapMoveEvent = false; }, 400);
@@ -704,6 +737,8 @@
       const txt = (it.비고 || "") + " " + (it.면적구조 || "") + " " + (it.용도 || "");
       return 위험키워드.filter(k => txt.includes(k));
     }
+    // 용도별 평균 낙찰가율(감정가 대비) - 통계 기반 참고 근사치
+    const 낙찰가율참고 = { 아파트: 0.87, 주택: 0.75, 상가: 0.68, 토지: 0.72, 기타: 0.70 };
     function bidHelperHtml(it) {
       const sqm = parseSqm(it.면적구조);
       const py = sqm ? sqm / 3.305785 : 0;
@@ -717,6 +752,7 @@
       if (sqm) h += '<div class="row"><span>면적</span><span class="val">' + sqm.toFixed(1) + '㎡ (' + py.toFixed(1) + '평)</span></div>';
       if (sqm && p0) h += '<div class="row"><span>평당 최저가</span><span class="val">' + 억(Math.round(p0 / py)) + '</span></div>';
       if (it.구분 !== "공매" && p0) h += '<div class="row"><span>차기 예상최저가</span><span class="val">' + 억(Math.round(p0 * 0.8)) + ' <span class="meta">(유찰시 −20%)</span></span></div>';
+      if (it.감정가) { const rate = 낙찰가율참고[it.분류] || 0.72; h += '<div class="row"><span>예상 낙찰가</span><span class="val">' + 억(Math.round(it.감정가 * rate)) + ' <span class="meta">(참고 ' + Math.round(rate * 100) + '%)</span></span></div>'; }
       if (dd != null) h += '<div class="row"><span>매각기일까지</span><span class="val">' + (dd > 0 ? 'D-' + dd : dd === 0 ? 'D-DAY' : Math.abs(dd) + '일 경과') + '</span></div>';
       h += '</div>';
       h += '<div style="font-size:12px;color:var(--muted);margin:8px 0 4px;">입찰가 입력 → 총 취득원가 계산</div>';
