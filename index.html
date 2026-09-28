@@ -715,6 +715,18 @@
            'style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;">';
       h += '<div id="bidCalcResult" style="margin-top:8px;"></div>';
       h += '<div class="doc-msg">※ 취득세·등기·명도비는 참고 추정치입니다.</div>';
+      // 수익률 계산기 (임대 가정)
+      const inS = 'padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;width:100%;';
+      h += '<div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">임대 수익률(선택): 보증금 / 월세 (만원)</div>';
+      h += '<div style="display:flex;gap:6px;">' +
+           '<input id="depInput" type="number" placeholder="보증금" oninput="updateBidCalc()" style="' + inS + '">' +
+           '<input id="rentInput" type="number" placeholder="월세" oninput="updateBidCalc()" style="' + inS + '"></div>';
+      h += '<div id="yieldResult" style="margin-top:8px;"></div>';
+      // 실거래가 시세비교 (아파트)
+      if (it.분류 === "아파트") {
+        h += '<button class="doc-btn" style="margin-top:12px;width:100%" onclick="loadRealPrice()">🏢 주변 아파트 실거래가 비교</button>';
+        h += '<div id="realPriceBox" style="margin-top:8px;"></div>';
+      }
       const q = encodeURIComponent((it.소재지 || it.물건명 || "") + " 실거래가");
       h += '<button class="doc-btn secondary" style="margin-top:6px;width:100%" onclick="window.open(\'https://search.naver.com/search.naver?query=' + q + '\',\'_blank\',\'noopener\')">💹 주변 시세 검색 (네이버)</button>';
       return h;
@@ -732,6 +744,69 @@
         '<div class="row"><span>명도비(추정)</span><span class="val">' + fmtWon(c.명도) + '</span></div>' +
         '<div class="row"><span>총 취득원가</span><span class="val low">' + 억(c.총) + '</span></div>' +
         (대비 != null ? '<div class="row"><span>감정가 대비</span><span class="val">' + Math.abs(대비) + '% ' + (대비 >= 0 ? '저가' : '고가') + '</span></div>' : '');
+      // 임대 수익률
+      const yb = document.getElementById("yieldResult"); if (!yb) return;
+      const dep = (parseInt((document.getElementById("depInput") || {}).value || "0", 10) || 0) * 10000;
+      const rent = (parseInt((document.getElementById("rentInput") || {}).value || "0", 10) || 0) * 10000;
+      if (rent > 0) {
+        const 실투자 = Math.max(1, c.총 - dep);
+        const 표면 = (rent * 12) / c.총 * 100;
+        const 실질 = (rent * 12) / 실투자 * 100;
+        yb.innerHTML =
+          '<div class="row"><span>실투자금(총원가−보증금)</span><span class="val">' + 억(실투자) + '</span></div>' +
+          '<div class="row"><span>표면 수익률</span><span class="val">' + 표면.toFixed(1) + '%</span></div>' +
+          '<div class="row"><span>실질 수익률</span><span class="val low">' + 실질.toFixed(1) + '%</span></div>';
+      } else { yb.innerHTML = ""; }
+    }
+
+    // 좌표 → 법정동 시군구코드(5자리) : 국토부 실거래가 조회용
+    function coord2Lawd(lng, lat) {
+      return new Promise(resolve => {
+        const g = new kakao.maps.services.Geocoder();
+        g.coord2RegionCode(lng, lat, (result, status) => {
+          if (status === kakao.maps.services.Status.OK) {
+            const b = result.find(r => r.region_type === "B") || result[0];
+            resolve(b && b.code ? String(b.code).slice(0, 5) : null);
+          } else resolve(null);
+        });
+      });
+    }
+    // 인근 아파트 실거래가를 조회해 최저가 대비 시세를 보여준다.
+    async function loadRealPrice() {
+      const it = curDetailItem; const box = document.getElementById("realPriceBox");
+      if (!box) return;
+      if (!it || it.lat == null) { box.innerHTML = "위치 좌표가 없어 조회할 수 없습니다."; return; }
+      box.innerHTML = "실거래가 조회 중…";
+      const lawd = await coord2Lawd(it.lng, it.lat);
+      if (!lawd) { box.innerHTML = "지역코드 확인에 실패했습니다."; return; }
+      const now = new Date(); let all = []; let apiErr = null;
+      for (let i = 1; i <= 3; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const ym = d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0");
+        try {
+          const j = await (await fetch("/api/realprice?lawd=" + lawd + "&ymd=" + ym)).json();
+          if (j.error) { apiErr = j; break; }
+          all = all.concat(j.items || []);
+        } catch (e) { apiErr = { message: String(e) }; break; }
+      }
+      if (apiErr) {
+        box.innerHTML = (apiErr.error === "NO_KEY" || apiErr.error === "API_ERROR")
+          ? '⚠️ 실거래가 비교를 쓰려면 공공데이터포털에서 <b>국토교통부_아파트 매매 실거래가</b> API를 활용신청하세요(같은 키 사용).'
+          : ("오류: " + (apiErr.message || apiErr.error));
+        return;
+      }
+      if (!all.length) { box.innerHTML = "최근 3개월 실거래 내역이 없습니다."; return; }
+      const nm = (it.물건명 || it.소재지 || "");
+      const same = all.filter(x => x.아파트 && nm.includes(x.아파트));
+      const pool = same.length ? same : all;
+      const withPy = pool.filter(x => x.전용면적 > 0);
+      const avgPyWon = withPy.length ? Math.round(withPy.reduce((s, x) => s + (x.거래금액 * 10000) / (x.전용면적 / 3.305785), 0) / withPy.length) : 0;
+      const sqm = parseSqm(it.면적구조);
+      const 최저평 = (it.최저가 && sqm) ? Math.round(it.최저가 / (sqm / 3.305785)) : 0;
+      const recent = pool.slice(0, 5).map(x => x.아파트 + " " + x.전용면적 + "㎡ " + x.층 + "층 · " + 억(x.거래금액 * 10000) + " (" + x.월 + "/" + x.일 + ")").join("<br>");
+      let head = (same.length ? "[동일 단지] " : "[인근 아파트] ") + "평균 평단가 ≈ <b>" + 억(avgPyWon) + "</b>";
+      if (최저평 && avgPyWon) head += "<br>최저가 평단가 " + 억(최저평) + " → 시세 대비 <b>" + Math.abs(Math.round((1 - 최저평 / avgPyWon) * 100)) + "% " + (최저평 < avgPyWon ? "저렴" : "비쌈") + "</b>";
+      box.innerHTML = '<div style="font-size:12px;line-height:1.7;color:var(--text);">' + head + '<br><span style="color:var(--muted);">' + recent + '</span></div>';
     }
 
     function showDetail(it) {
