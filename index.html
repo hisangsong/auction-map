@@ -517,6 +517,7 @@
           '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
           (it.구분==="공매" ? '<span class="type-tag" style="background:'+구분색.공매+'">공매</span>' : '')+
           '<span class="meta">'+it.용도+'</span>'+
+          (riskFlags(it).length ? '<span title="특수권리 주의" style="color:#fca5a5;font-size:12px;">⚠️</span>' : '')+
           '<button class="fav-star'+(isFav(it)?' active':'')+'" title="관심목록">'+(isFav(it)?'★':'☆')+'</button></div>'+
           '<div class="addr">'+it.소재지+'</div>'+
           '<div class="row2"><span class="price">'+억(it.최저가)+' <span class="meta">('+it.최저가율+'%)</span></span>'+
@@ -685,14 +686,28 @@
       return { 취득세, 등기법무, 명도, 총: price + 취득세 + 등기법무 + 명도 };
     }
     function fmtWon(n) { return (n || 0).toLocaleString() + "원"; }
+    // 낙찰 후 문제되는 '특수권리·주의사항'을 비고/구조에서 자동 감지 (전문가 체크리스트)
+    const 위험키워드 = [
+      "유치권", "법정지상권", "분묘기지권", "지분", "대지권미등기", "대지권 없음", "토지별도등기",
+      "예고등기", "가처분", "위반건축물", "농지취득", "맹지", "선순위", "대항력", "임차인", "제시외",
+    ];
+    function riskFlags(it) {
+      const txt = (it.비고 || "") + " " + (it.면적구조 || "") + " " + (it.용도 || "");
+      return 위험키워드.filter(k => txt.includes(k));
+    }
     function bidHelperHtml(it) {
       const sqm = parseSqm(it.면적구조);
       const py = sqm ? sqm / 3.305785 : 0;
       const dd = dday(it.매각기일);
       const p0 = it.최저가 || 0;
-      let h = '<div class="sec-h" style="margin-top:16px;">📊 입찰 판단 도우미</div><div>';
+      const risks = riskFlags(it);
+      let h = risks.length
+        ? '<div style="margin-top:14px;padding:10px 12px;border-radius:10px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);font-size:12px;color:#fca5a5;line-height:1.5;">⚠️ 특수권리·주의: <b>' + risks.join(", ") + '</b><br>낙찰 후 인수·명도 부담이 될 수 있으니 매각물건명세서·등기부를 반드시 확인하세요.</div>'
+        : '';
+      h += '<div class="sec-h" style="margin-top:16px;">📊 입찰 판단 도우미</div><div>';
       if (sqm) h += '<div class="row"><span>면적</span><span class="val">' + sqm.toFixed(1) + '㎡ (' + py.toFixed(1) + '평)</span></div>';
       if (sqm && p0) h += '<div class="row"><span>평당 최저가</span><span class="val">' + 억(Math.round(p0 / py)) + '</span></div>';
+      if (it.구분 !== "공매" && p0) h += '<div class="row"><span>차기 예상최저가</span><span class="val">' + 억(Math.round(p0 * 0.8)) + ' <span class="meta">(유찰시 −20%)</span></span></div>';
       if (dd != null) h += '<div class="row"><span>매각기일까지</span><span class="val">' + (dd > 0 ? 'D-' + dd : dd === 0 ? 'D-DAY' : Math.abs(dd) + '일 경과') + '</span></div>';
       h += '</div>';
       h += '<div style="font-size:12px;color:var(--muted);margin:8px 0 4px;">입찰가 입력 → 총 취득원가 계산</div>';
