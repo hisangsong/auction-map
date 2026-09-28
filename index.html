@@ -158,9 +158,12 @@
       <div class="count" id="count">불러오는 중…</div>
       <select id="sortSel" class="sort-sel" onchange="onSortChange(this.value)">
         <option value="default">기본 정렬</option>
+        <option value="dday">매각임박순</option>
+        <option value="discount">저감율 높은순</option>
         <option value="yuchal">유찰 많은순</option>
         <option value="priceAsc">최저가 낮은순</option>
         <option value="priceDesc">최저가 높은순</option>
+        <option value="pyeong">평단가 낮은순</option>
       </select>
       <div id="list"></div>
     </aside>
@@ -492,10 +495,16 @@
 
     // 목록 정렬: shownNatural(지역균형 원본)에서 파생. 기본은 원본 순서 유지.
     function applySort() {
+      const ddv = (x) => { const d = dday(x.매각기일); return (d == null || d < 0) ? 1e9 : d; };
+      const disc = (x) => (x.감정가 ? (1 - (x.최저가 || 0) / x.감정가) : -1);
+      const pyv = (x) => { const s = parseSqm(x.면적구조); return (s && x.최저가) ? x.최저가 / (s / 3.305785) : Infinity; };
       const cmp = {
+        dday:      (a,b) => ddv(a) - ddv(b),
+        discount:  (a,b) => disc(b) - disc(a),
         yuchal:    (a,b) => (b.유찰||0) - (a.유찰||0) || (a.최저가||0) - (b.최저가||0),
         priceAsc:  (a,b) => (a.최저가||0) - (b.최저가||0),
         priceDesc: (a,b) => (b.최저가||0) - (a.최저가||0),
+        pyeong:    (a,b) => pyv(a) - pyv(b),
       }[curSort];
       shown = cmp ? shownNatural.slice().sort(cmp) : shownNatural.slice();
     }
