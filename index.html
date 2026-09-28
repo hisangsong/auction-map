@@ -151,6 +151,7 @@
       <div class="price-dd-panel" id="priceDdPanel"></div>
     </div>
     <button type="button" class="fav-toggle" id="favToggleBtn"></button>
+    <button type="button" class="fav-toggle" id="compareBtn" onclick="openCompare()">📋 비교·일정</button>
     <div class="filters" id="filters"></div>
     <div class="filters" id="yuchalFilters"></div>
   </header>
@@ -774,6 +775,8 @@
       }
       const q = encodeURIComponent((it.소재지 || it.물건명 || "") + " 실거래가");
       h += '<button class="doc-btn secondary" style="margin-top:6px;width:100%" onclick="window.open(\'https://search.naver.com/search.naver?query=' + q + '\',\'_blank\',\'noopener\')">💹 주변 시세 검색 (네이버)</button>';
+      h += '<button class="doc-btn secondary" style="margin-top:6px;width:100%" onclick="loadNearby()">🚇 주변 지하철·학교·마트</button>';
+      h += '<div id="nearbyBox" style="margin-top:6px;"></div>';
       h += '<div style="display:flex;gap:6px;margin-top:6px;">' +
            '<button class="doc-btn secondary" style="flex:1;font-size:11px;" onclick="openRefSite(\'iros\')">📕 등기부 열람</button>' +
            '<button class="doc-btn secondary" style="flex:1;font-size:11px;" onclick="openRefSite(\'eum\')">🗺️ 토지이용계획</button></div>';
@@ -785,6 +788,55 @@
       if (navigator.clipboard && it.소재지) navigator.clipboard.writeText(it.소재지).catch(() => {});
       const urls = { iros: "https://www.iros.go.kr/PMainJ.jsp", eum: "https://www.eum.go.kr/web/ar/lu/luLandForm.jsp" };
       window.open(urls[kind] || "https://www.iros.go.kr", "_blank", "noopener");
+    }
+
+    // ---------- 관심물건 비교표 + 입찰 캘린더 ----------
+    function allKnownItems() { return DATA.items.concat(Object.values(onbidBySido).flat()); }
+    function favItems() {
+      const seen = new Set(), out = [];
+      allKnownItems().forEach(it => { if (isFav(it)) { const k = favKey(it); if (!seen.has(k)) { seen.add(k); out.push(it); } } });
+      return out;
+    }
+    function openCompare() {
+      const body = document.getElementById("docModalBody");
+      const items = favItems();
+      if (!items.length) {
+        body.innerHTML = '<h3>📋 관심물건 비교·일정</h3><p style="color:var(--muted);">관심목록(★)에 담은 물건이 없습니다. 목록/상세에서 ☆를 눌러 담아보세요.</p>';
+        document.getElementById("docModal").classList.add("show"); return;
+      }
+      const dv = (x) => { const d = dday(x.매각기일); return d == null ? 1e9 : d < 0 ? 1e8 + Math.abs(d) : d; };
+      items.sort((a, b) => dv(a) - dv(b));
+      let h = '<h3>📋 관심물건 비교·일정 (' + items.length + ')</h3><div style="overflow-x:auto;"><table>' +
+        '<tr><th>물건</th><th>용도</th><th>감정가</th><th>최저가(율)</th><th>유찰</th><th>매각기일</th><th>평단가</th><th>예상낙찰</th><th>주의</th></tr>';
+      items.forEach(it => {
+        const d = dday(it.매각기일);
+        const dds = d == null ? "-" : d > 0 ? "D-" + d : d === 0 ? "D-DAY" : Math.abs(d) + "일경과";
+        const sqm = parseSqm(it.면적구조);
+        const py = sqm ? 억(Math.round((it.최저가 || 0) / (sqm / 3.305785))) : "-";
+        const est = it.감정가 ? 억(Math.round(it.감정가 * (낙찰가율참고[it.분류] || 0.72))) : "-";
+        h += '<tr><td>' + (it.소재지 || it.물건명 || "") + '</td><td>' + (it.용도 || "") + (it.구분 === "공매" ? " <span style=\"color:#a78bfa\">(공매)</span>" : "") +
+          '</td><td>' + 억(it.감정가) + '</td><td>' + 억(it.최저가) + ' (' + (it.최저가율 || "-") + '%)</td><td>' + (it.유찰 || 0) +
+          '</td><td>' + (it.매각기일 || "-") + '<br><span style="color:var(--accent);">' + dds + '</span></td><td>' + py + '</td><td>' + est +
+          '</td><td>' + (riskFlags(it).length ? "⚠️" : "") + '</td></tr>';
+      });
+      h += '</table></div><div class="doc-msg">매각기일 임박순 정렬 · 예상낙찰은 용도별 평균 낙찰가율(참고) 기준입니다.</div>';
+      body.innerHTML = h;
+      document.getElementById("docModal").classList.add("show");
+    }
+
+    // ---------- 주변 인프라 (지하철·학교) ----------
+    async function loadNearby() {
+      const it = curDetailItem; const box = document.getElementById("nearbyBox"); if (!box) return;
+      if (!it || it.lat == null) { box.innerHTML = "위치 좌표가 없어 조회할 수 없습니다."; return; }
+      box.innerHTML = "주변 시설 검색 중…";
+      const loc = new kakao.maps.LatLng(it.lat, it.lng);
+      const cat = (code) => new Promise(r => {
+        new kakao.maps.services.Places().categorySearch(code, (d, s) => r(s === kakao.maps.services.Status.OK ? d : []), { location: loc, radius: 1500, sort: "distance" });
+      });
+      const [subway, school, mart] = await Promise.all([cat("SW8"), cat("SC4"), cat("MT1")]);
+      const fmt = (arr) => arr.slice(0, 3).map(p => p.place_name + " (" + Math.round(p.distance) + "m)").join(", ") || "1.5km 내 없음";
+      box.innerHTML = '<div style="font-size:12px;line-height:1.7;">' +
+        '<b>🚇 지하철</b>: ' + fmt(subway) + '<br><b>🏫 학교</b>: ' + fmt(school) + '<br><b>🛒 마트</b>: ' + fmt(mart) + '</div>';
     }
     function updateBidCalc() {
       const it = curDetailItem; if (!it) return;
