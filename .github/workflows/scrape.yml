@@ -2,7 +2,7 @@ name: 법원경매물건 데이터 자동 갱신
 
 on:
   schedule:
-    - cron: '0 21 */2 * *'  # 매월 홀수일 21:00 UTC = 짝수일 06:00 KST (격일)
+    - cron: '0 21 * * *'  # 매일 21:00 UTC = 매일 06:00 KST
   workflow_dispatch: {}
 
 permissions:
