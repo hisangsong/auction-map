@@ -590,6 +590,7 @@
         el.className = "item" + (i === activeIdx ? " active" : "");
         el.innerHTML =
           '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
+          ((curSrc==="전체"||curFavOnly) && (it.구분||"경매")==="경매" ? '<span class="type-tag" style="background:'+구분색.경매+'">경매</span>' : '')+
           (it.구분==="공매" ? '<span class="type-tag" style="background:'+구분색.공매+'">공매</span>' : '')+
           (it.구분==="자동차" ? '<span class="type-tag" style="background:'+구분색.자동차+'">🚗 자동차</span>' : '')+
           (it.구분==="동산" ? '<span class="type-tag" style="background:'+구분색.동산+'">📦 동산</span>' : '')+
@@ -1007,6 +1008,7 @@
       if (it.구분 === "공매") { showGonmeDetail(it, 저감); return; }
       document.getElementById("detailBody").innerHTML =
         '<span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
+        ' <span class="type-tag" style="background:'+구분색.경매+'">⚖️ 경매</span>'+
         '<h3>'+it.소재지+'</h3>'+
         '<div class="sub">'+it.법원+' · '+it.사건번호+'</div>'+
         '<div class="row"><span>용도</span><span class="val">'+it.용도+'</span></div>'+
