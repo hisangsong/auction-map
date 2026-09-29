@@ -232,7 +232,7 @@
     ];
 
     let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], shownNatural = [], curSort = "default", curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
-    let curSrc = "경매", onbidBySido = {}, onbidError = null, carItems = [], carLoaded = null, assetItems = [], assetLoaded = null;
+    let curSrc = "전체", onbidBySido = {}, onbidError = null, carItems = [], carLoaded = null, assetItems = [], assetLoaded = null;
     const 구분색 = { 경매:"#38bdf8", 공매:"#a78bfa", 자동차:"#f59e0b", 동산:"#14b8a6" };
     const isMovableSrc = () => curSrc === "자동차" || curSrc === "동산";
 
@@ -336,7 +336,7 @@
     function buildSrcSelect() {
       const sel = document.getElementById("srcSel");
       sel.innerHTML = "";
-      [["경매","⚖️ 경매"], ["공매","🔨 공매"], ["동산","📦 동산"], ["자동차","🚗 자동차"], ["전체","경매+공매"]].forEach(([v, t]) => {
+      [["전체","경매+공매"], ["경매","⚖️ 경매"], ["공매","🔨 공매"], ["동산","📦 동산"], ["자동차","🚗 자동차"]].forEach(([v, t]) => {
         const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
       });
       sel.value = curSrc;
