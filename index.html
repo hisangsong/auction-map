@@ -1044,8 +1044,11 @@
         '<span class="type-tag" style="background:'+구분색.자동차+'">🚗 자동차</span>'+
         '<h3>'+(it.물건명 || "차량")+'</h3>'+
         '<div class="sub">캠코 온비드 · '+(it.사건번호 || "")+'</div>'+
-        '<div class="row"><span>차종</span><span class="val">'+(it.용도 || "-")+'</span></div>'+
+        (it.이미지 ? '<img src="'+it.이미지+'" style="width:100%;border-radius:10px;margin-bottom:10px;" onerror="this.style.display=\'none\'">' : '')+
+        '<div class="row"><span>차종</span><span class="val">'+(it.용도 || "-")+(it.연식?' · '+it.연식+'년':'')+'</span></div>'+
+        (it.차량번호 ? '<div class="row"><span>차량번호</span><span class="val">'+it.차량번호+'</span></div>' : '')+
         (it.주행거리 ? '<div class="row"><span>주행거리</span><span class="val">'+it.주행거리.toLocaleString()+'km</span></div>' : '')+
+        (it.연료 ? '<div class="row"><span>연료/변속</span><span class="val">'+it.연료+(it.변속기?' · '+it.변속기:'')+'</span></div>' : '')+
         '<div class="row"><span>감정가</span><span class="val">'+억(it.감정가)+'</span></div>'+
         '<div class="row"><span>최저입찰가</span><span class="val low">'+억(it.최저가)+
           (저감>0?'<span class="discount">'+저감+'% ↓</span>':'')+'</span></div>'+

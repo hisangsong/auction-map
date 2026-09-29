@@ -84,7 +84,12 @@ export default async function handler(req, res) {
         입찰시작: ymd(o.cltrBidBgngDt), 입찰종료: ymd(o.cltrBidEndDt),
         처분방식: o.dspsMthodNm || "", 상태: o.bidMthodNm || "",
         면적구조: "", 비고: o.prptDivNm || "",
-        주행거리: isCar ? num(o.mlge ?? o.mileage ?? o.carMlge ?? o.dstnc) : 0,
+        주행거리: isCar ? num(o.drvDstc) : 0,
+        연식: isCar ? (o.yrmdl || "") : "",
+        차량번호: isCar ? (o.vhrnoCont || "") : "",
+        연료: isCar ? (o.fuelCont || "") : "",
+        변속기: isCar ? (o.pnsNm || "") : "",
+        이미지: isCar ? (o.thnlImgUrlAdr || "") : "",
         물건명: o.onbidCltrNm || "",
         고유번호: (isCar ? "ONBIDCAR-" : "ONBID-") + (o.cltrMngNo || "") + "-" + (o.pbctCdtnNo || ""),
         onbid: {
