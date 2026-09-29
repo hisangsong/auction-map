@@ -714,6 +714,21 @@
       return [...sameGu, ...sameSido, ...rest];
     }
 
+    // 여러 물건 좌표를 동시(concurrency)에 병렬 변환 - 순차보다 몇 배 빠름
+    async function geocodeMany(list, concurrency) {
+      let idx = 0;
+      async function worker() {
+        while (idx < list.length) {
+          const it = list[idx++];
+          if (it.lat != null) continue;
+          const q = (it.구분 === "자동차" || it.구분 === "동산") ? (it.보관지 || it.소재지) : it.소재지;
+          const r = await geocodeP(q, 1);
+          if (r) { it.lat = r.lat; it.lng = r.lng; }
+        }
+      }
+      await Promise.all(Array.from({ length: concurrency }, worker));
+    }
+
     async function researchInMapBounds(auto) {
       const btn = document.getElementById("mapResearchBtn");
       if (!map || researching) return;
@@ -725,19 +740,21 @@
       try {
         const center = map.getCenter();
         const region = await coord2Region(center.getLng(), center.getLat());
-        const candidates = prioritizeByRegion(buildFilteredItems({ includeSido: false }), region);
+        const inBounds = (it) => it.lat != null && bounds.contain(new kakao.maps.LatLng(it.lat, it.lng));
 
         const matched = [];
-        let geocodedCount = 0;
-        for (const it of candidates) {
-          if (it.lat == null) {
-            if (geocodedCount >= MAP_RESEARCH_MAX_GEOCODE) continue;
-            const r = await geocodeP(it.소재지, 2);
-            geocodedCount++;
-            if (r) { it.lat = r.lat; it.lng = r.lng; } else continue;
-          }
-          if (bounds.contain(new kakao.maps.LatLng(it.lat, it.lng))) matched.push(it);
+        const need = [];
+        // 이미 좌표 있는 건 즉시 판정(무료). 좌표 없는 건 '화면 시/도' 것만 변환 대상으로.
+        for (const it of buildFilteredItems({ includeSido: false })) {
+          if (it.lat != null) { if (inBounds(it)) matched.push(it); }
+          else if (!region || it.시도 === region.region_1depth_name) need.push(it);
         }
+        // 같은 시군구 우선
+        if (region) need.sort((a, b) =>
+          (b.시군구 === region.region_2depth_name ? 1 : 0) - (a.시군구 === region.region_2depth_name ? 1 : 0));
+        const budget = need.slice(0, MAP_RESEARCH_MAX_GEOCODE);
+        await geocodeMany(budget, 8); // 동시 8개 병렬
+        budget.forEach(it => { if (inBounds(it)) matched.push(it); });
         activeIdx = -1;
         closeDetail();
         mapSearchActive = true;
