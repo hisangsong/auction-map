@@ -232,8 +232,8 @@
     ];
 
     let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], shownNatural = [], curSort = "default", curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
-    let curSrc = "경매", onbidBySido = {}, onbidError = null;
-    const 구분색 = { 경매:"#38bdf8", 공매:"#a78bfa" };
+    let curSrc = "경매", onbidBySido = {}, onbidError = null, carItems = [], carLoaded = null;
+    const 구분색 = { 경매:"#38bdf8", 공매:"#a78bfa", 자동차:"#f59e0b" };
 
     /* ---------- 관심목록 (localStorage) ---------- */
     const FAV_KEY = "auctionFavorites";
@@ -285,7 +285,9 @@
     }
     function 지역라벨() {
       if (mapSearchActive) return "지도 영역 내";
-      return curFavOnly ? "관심목록" : curSido + (curGu === "전체" ? " 전체" : " " + curGu);
+      if (curFavOnly) return "관심목록";
+      if (curSrc === "자동차") return "자동차 전국";
+      return curSido + (curGu === "전체" ? " 전체" : " " + curGu);
     }
 
     function loadKakao() {
@@ -332,7 +334,7 @@
     function buildSrcSelect() {
       const sel = document.getElementById("srcSel");
       sel.innerHTML = "";
-      [["경매","⚖️ 경매"], ["공매","🔨 공매"], ["전체","경매+공매"]].forEach(([v, t]) => {
+      [["경매","⚖️ 경매"], ["공매","🔨 공매"], ["자동차","🚗 자동차"], ["전체","경매+공매"]].forEach(([v, t]) => {
         const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
       });
       sel.value = curSrc;
@@ -368,6 +370,16 @@
         onbidBySido[sido] = (json.items || []);
         return onbidBySido[sido];
       } catch (e) { onbidError = { message: String(e) }; onbidBySido[sido] = []; return []; }
+    }
+
+    // 온비드 차량 목록(위치 없음, 목록전용)을 한 번만 불러온다.
+    async function ensureCarLoaded() {
+      if (carLoaded === true) { onbidError = null; return; } // 성공은 캐시, 실패는 재시도
+      try {
+        const j = await (await fetch("/api/onbid?type=car&rows=1000")).json();
+        if (j.error) { onbidError = j; carItems = []; carLoaded = false; return; }
+        onbidError = null; carItems = (j.items || []); carLoaded = true;
+      } catch (e) { onbidError = { message: String(e) }; carItems = []; carLoaded = false; }
     }
 
     function buildSidoSelect() {
@@ -454,20 +466,24 @@
       const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
       const 공매현재 = onbidBySido[curSido] || [];
       let base;
-      if (curFavOnly) base = DATA.items.concat(Object.values(onbidBySido).flat());
+      if (curFavOnly) base = DATA.items.concat(Object.values(onbidBySido).flat(), carItems);
       else if (curSrc === "공매") base = 공매현재;
+      else if (curSrc === "자동차") base = carItems;
       else if (curSrc === "전체") base = DATA.items.concat(공매현재);
       else base = DATA.items;
       let items = base
         .map(it => { it.구분 = it.구분 || "경매"; it.분류 = it.분류 || 분류(it.용도); it.유찰구분 = it.유찰구분 || 유찰구분(it.유찰); return it; });
+      const 금액ok = (it) => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); };
       if (curFavOnly) {
         items = items.filter(it => isFav(it));
+      } else if (curSrc === "자동차") {
+        items = items.filter(금액ok); // 자동차는 위치·용도·유찰 개념이 없어 금액대만 적용
       } else {
         items = items
           .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
           .filter(it => curType === "전체" || it.분류 === curType)
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
-          .filter(it => { const p = it.최저가 || 0; return 금액bands.some(band => p >= band.min && p < band.max); });
+          .filter(금액ok);
       }
       return items;
     }
@@ -480,7 +496,14 @@
       mapSearchActive = false;
       userMovedMap = false;   // 새 필터 조회이므로 결과에 맞춰 한 번 재fit 허용
       document.getElementById("mapResearchBtn").hidden = false; // 버튼은 항상 표시
-      if (curSrc !== "경매" && !curFavOnly) {
+      if (!curFavOnly && curSrc === "자동차") {
+        document.getElementById("count").textContent = "온비드 차량 불러오는 중…";
+        await ensureCarLoaded();
+        if (onbidError) {
+          showOverlay(onbidError.error === "API_ERROR" ? "차량 데이터 오류" : "🔑 차량: 활용신청 필요",
+            onbidError.message || "공공데이터포털에서 '차세대 온비드 차량 물건목록 조회서비스' 활용신청이 필요합니다.");
+        }
+      } else if (!curFavOnly && curSrc !== "경매") {
         document.getElementById("count").textContent = "온비드 공매물건 불러오는 중…";
         await loadOnbidForSido(curSido);
         if (onbidError) {
@@ -494,14 +517,18 @@
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
       document.getElementById("count").textContent = 지역라벨() + " · " + 표시 + " · 위치 찾는 중…";
       renderList();
-      for (const it of shown) {
-        if (it.lat == null) {
-          const r = await geocodeP(it.소재지, 2);
-          if (r) { it.lat = r.lat; it.lng = r.lng; }
-          else it.lat = it.lat; // 못 찾으면 그대로 (마커 생략)
+      if (curSrc !== "자동차") { // 자동차는 위치가 없어 좌표변환/마커 생략(목록전용)
+        for (const it of shown) {
+          if (it.lat == null) {
+            const r = await geocodeP(it.소재지, 2);
+            if (r) { it.lat = r.lat; it.lng = r.lng; }
+          }
         }
       }
       render();
+      if (curSrc === "자동차" && !onbidError) {
+        showOverlay("🚗 자동차 목록", "자동차는 위치정보가 없어 지도 대신 왼쪽 목록으로 표시됩니다.");
+      }
     }
 
     function geocodeP(query, tries) {
@@ -547,6 +574,7 @@
         el.innerHTML =
           '<div class="top"><span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
           (it.구분==="공매" ? '<span class="type-tag" style="background:'+구분색.공매+'">공매</span>' : '')+
+          (it.구분==="자동차" ? '<span class="type-tag" style="background:'+구분색.자동차+'">🚗 자동차</span>' : '')+
           '<span class="meta">'+it.용도+'</span>'+
           (riskFlags(it).length ? '<span title="특수권리 주의" style="color:#fca5a5;font-size:12px;">⚠️</span>' : '')+
           '<button class="fav-star'+(isFav(it)?' active':'')+'" title="관심목록">'+(isFav(it)?'★':'☆')+'</button></div>'+
@@ -939,6 +967,7 @@
     function showDetail(it) {
       curDetailItem = it;
       const 저감 = it.감정가 ? Math.round((1 - it.최저가/it.감정가) * 100) : 0;
+      if (it.구분 === "자동차") { showCarDetail(it, 저감); return; }
       if (it.구분 === "공매") { showGonmeDetail(it, 저감); return; }
       document.getElementById("detailBody").innerHTML =
         '<span class="type-tag" style="background:'+색상[it.분류]+'">'+it.분류+'</span>'+
@@ -1006,6 +1035,28 @@
       const no = it.사건번호 || "";
       if (navigator.clipboard && no) navigator.clipboard.writeText(no).catch(() => {});
       window.open("https://www.onbid.co.kr/op/ppa/selectAdvancedSearch.do", "_blank", "noopener");
+    }
+
+    // 자동차(온비드) 상세 - 위치가 없으므로 지도/입찰판단 없이 차량정보+온비드 링크
+    function showCarDetail(it, 저감) {
+      curDetailItem = it;
+      document.getElementById("detailBody").innerHTML =
+        '<span class="type-tag" style="background:'+구분색.자동차+'">🚗 자동차</span>'+
+        '<h3>'+(it.물건명 || "차량")+'</h3>'+
+        '<div class="sub">캠코 온비드 · '+(it.사건번호 || "")+'</div>'+
+        '<div class="row"><span>차종</span><span class="val">'+(it.용도 || "-")+'</span></div>'+
+        (it.주행거리 ? '<div class="row"><span>주행거리</span><span class="val">'+it.주행거리.toLocaleString()+'km</span></div>' : '')+
+        '<div class="row"><span>감정가</span><span class="val">'+억(it.감정가)+'</span></div>'+
+        '<div class="row"><span>최저입찰가</span><span class="val low">'+억(it.최저가)+
+          (저감>0?'<span class="discount">'+저감+'% ↓</span>':'')+'</span></div>'+
+        '<div class="row"><span>입찰기간</span><span class="val">'+(it.입찰시작||"?")+' ~ '+(it.입찰종료||"?")+'</span></div>'+
+        '<div class="row"><span>유찰</span><span class="val">'+(it.유찰||0)+'회</span></div>'+
+        '<div class="row"><span>물건관리번호</span><span class="val">'+(it.사건번호||"-")+'</span></div>'+
+        '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)" style="margin-top:14px;">'+
+          (isFav(it)?'★ 관심목록에서 제거':'☆ 관심목록에 추가')+'</button>'+
+        '<button class="doc-btn" style="margin-top:10px;width:100%;background:#a78bfa" onclick="openOnbid(curDetailItem)">🔗 온비드에서 보기</button>'+
+        '<div class="doc-msg">온비드에서 물건관리번호로 검색하면 사진·상세정보를 볼 수 있습니다.</div>';
+      document.getElementById("detail").classList.add("show");
     }
 
     let curDetailItem = null;
