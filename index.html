@@ -339,9 +339,27 @@
       sel.onchange = () => { curSrc = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
 
-    // 선택한 시/도의 공매(온비드) 물건을 불러와 캐시한다. (전국 7만+ → 시/도 단위 조회)
+    // 매일 저장되는 onbid.json(전국 공매)을 한 번만 불러와 시/도별로 묶는다.
+    let onbidStored = null; // null=미시도, true=저장파일 사용, false=라이브 폴백
+    async function ensureOnbidStored() {
+      if (onbidStored !== null) return;
+      try {
+        const res = await fetch("onbid.json", { cache: "no-cache" });
+        if (!res.ok) { onbidStored = false; return; }
+        const j = await res.json();
+        const arr = j.items || [];
+        if (!arr.length) { onbidStored = false; return; }
+        const g = {};
+        arr.forEach(it => { const s = it.시도; if (!s) return; (g[s] = g[s] || []).push(it); });
+        onbidBySido = g;
+        onbidStored = true;
+      } catch (e) { onbidStored = false; }
+    }
+    // 선택한 시/도의 공매를 반환. 저장파일(onbid.json)이 있으면 그걸, 없으면 라이브 API로.
     async function loadOnbidForSido(sido) {
       if (!sido) return [];
+      await ensureOnbidStored();
+      if (onbidStored) { onbidError = null; return onbidBySido[sido] || []; }
       if (onbidBySido[sido]) { onbidError = null; return onbidBySido[sido]; }
       try {
         const json = await (await fetch("/api/onbid?rows=1000&sido=" + encodeURIComponent(sido))).json();

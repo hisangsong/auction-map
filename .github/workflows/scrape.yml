@@ -21,17 +21,23 @@ jobs:
       - name: 의존성 설치
         run: pip install requests pandas openpyxl
 
-      - name: 데이터 수집 (data.json 생성)
+      - name: 경매 데이터 수집 (data.json 생성)
         run: python build_data.py
+
+      - name: 공매 데이터 수집 (onbid.json 생성)
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+        run: python build_onbid.py
 
       - name: 변경사항 커밋 및 푸시
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data.json
+          git add onbid.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "변경 없음, 커밋 생략"
           else
-            git commit -m "chore: 법원경매물건 데이터 자동 갱신 ($(date -u +%F))"
+            git commit -m "chore: 경매/공매 데이터 자동 갱신 ($(date -u +%F))"
             git push
           fi
