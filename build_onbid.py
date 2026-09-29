@@ -86,7 +86,11 @@ def to_movable(o, gubun):
     it = {
         "구분": gubun, "사건번호": cltr,
         "법원": o.get("orgNm") or o.get("rqstOrgNm") or "캠코 온비드",
-        "소재지": nm, "시도": "", "시군구": "", "읍면동": "",
+        "소재지": nm,
+        "보관지": " ".join(x for x in [o.get("lctnSdnm"), o.get("lctnSggnm"), o.get("lctnEmdNm")] if x).strip(),
+        "시도": norm_sido(o.get("lctnSdnm")),
+        "시군구": (o.get("lctnSggnm") or "").strip(),
+        "읍면동": (o.get("lctnEmdNm") or "").strip(),
         "용도": o.get("cltrUsgMclsCtgrNm") or o.get("cltrUsgSclsCtgrNm") or o.get("cltrUsgLclsCtgrNm") or gubun,
         "감정가": 감정가, "최저가": 최저가, "최저가율": 율, "유찰": num(o.get("usbdNft")),
         "매각기일": ymd(o.get("cltrBidEndDt")),

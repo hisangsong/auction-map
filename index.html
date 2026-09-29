@@ -287,8 +287,8 @@
     function 지역라벨() {
       if (mapSearchActive) return "지도 영역 내";
       if (curFavOnly) return "관심목록";
-      if (curSrc === "자동차") return "자동차 전국";
-      if (curSrc === "동산") return "동산 전국";
+      if (curSrc === "자동차") return "🚗 " + curSido + (curGu === "전체" ? " 전체" : " " + curGu);
+      if (curSrc === "동산") return "📦 " + curSido + (curGu === "전체" ? " 전체" : " " + curGu);
       return curSido + (curGu === "전체" ? " 전체" : " " + curGu);
     }
 
@@ -494,7 +494,9 @@
       if (curFavOnly) {
         items = items.filter(it => isFav(it));
       } else if (isMovableSrc()) {
-        items = items.filter(금액ok); // 동산·자동차는 위치·용도·유찰 개념이 없어 금액대만 적용
+        items = items
+          .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
+          .filter(금액ok); // 동산·자동차는 보관지 기준 시/도·금액만(용도·유찰 제외)
       } else {
         items = items
           .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
@@ -535,19 +537,15 @@
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
       document.getElementById("count").textContent = 지역라벨() + " · " + 표시 + " · 위치 찾는 중…";
       renderList();
-      if (!isMovableSrc()) { // 동산·자동차는 위치가 없어 좌표변환/마커 생략(목록전용)
-        for (const it of shown) {
-          if (it.lat == null) {
-            const r = await geocodeP(it.소재지, 2);
-            if (r) { it.lat = r.lat; it.lng = r.lng; }
-          }
+      for (const it of shown) {
+        if (it.lat == null) {
+          // 동산·자동차는 보관지(읍면동 수준)로 대략 위치 변환
+          const q = (it.구분 === "자동차" || it.구분 === "동산") ? (it.보관지 || it.소재지) : it.소재지;
+          const r = await geocodeP(q, 2);
+          if (r) { it.lat = r.lat; it.lng = r.lng; }
         }
       }
       render();
-      if (isMovableSrc() && !onbidError) {
-        const nm = curSrc === "자동차" ? "🚗 자동차" : "📦 동산";
-        showOverlay(nm + " 목록", (curSrc === "자동차" ? "자동차는" : "동산은") + " 위치정보가 없어 지도 대신 왼쪽 목록으로 표시됩니다.");
-      }
     }
 
     function geocodeP(query, tries) {
@@ -595,7 +593,7 @@
           (it.구분==="공매" ? '<span class="type-tag" style="background:'+구분색.공매+'">공매</span>' : '')+
           (it.구분==="자동차" ? '<span class="type-tag" style="background:'+구분색.자동차+'">🚗 자동차</span>' : '')+
           (it.구분==="동산" ? '<span class="type-tag" style="background:'+구분색.동산+'">📦 동산</span>' : '')+
-          '<span class="meta">'+it.용도+'</span>'+
+          '<span class="meta">'+it.용도+((it.구분==="자동차"||it.구분==="동산")&&it.보관지?' · '+it.보관지:'')+'</span>'+
           (riskFlags(it).length ? '<span title="특수권리 주의" style="color:#fca5a5;font-size:12px;">⚠️</span>' : '')+
           '<button class="fav-star'+(isFav(it)?' active':'')+'" title="관심목록">'+(isFav(it)?'★':'☆')+'</button></div>'+
           '<div class="addr">'+it.소재지+'</div>'+
@@ -1067,6 +1065,7 @@
         '<div class="sub">캠코 온비드 · '+(it.사건번호 || "")+'</div>'+
         (it.이미지 ? '<img src="'+it.이미지+'" style="width:100%;border-radius:10px;margin-bottom:10px;" onerror="this.style.display=\'none\'">' : '')+
         '<div class="row"><span>차종</span><span class="val">'+(it.용도 || "-")+(it.연식?' · '+it.연식+'년':'')+'</span></div>'+
+        (it.보관지 ? '<div class="row"><span>보관지</span><span class="val">'+it.보관지+'</span></div>' : '')+
         (it.차량번호 ? '<div class="row"><span>차량번호</span><span class="val">'+it.차량번호+'</span></div>' : '')+
         (it.주행거리 ? '<div class="row"><span>주행거리</span><span class="val">'+it.주행거리.toLocaleString()+'km</span></div>' : '')+
         (it.연료 ? '<div class="row"><span>연료/변속</span><span class="val">'+it.연료+(it.변속기?' · '+it.변속기:'')+'</span></div>' : '')+
@@ -1091,6 +1090,7 @@
         '<h3>'+(it.물건명 || "동산")+'</h3>'+
         '<div class="sub">캠코 온비드 · '+(it.사건번호 || "")+'</div>'+
         '<div class="row"><span>유형</span><span class="val">'+(it.용도 || "-")+'</span></div>'+
+        (it.보관지 ? '<div class="row"><span>보관지</span><span class="val">'+it.보관지+'</span></div>' : '')+
         '<div class="row"><span>감정가</span><span class="val">'+억(it.감정가)+'</span></div>'+
         '<div class="row"><span>최저입찰가</span><span class="val low">'+억(it.최저가)+
           (저감>0?'<span class="discount">'+저감+'% ↓</span>':'')+'</span></div>'+

@@ -82,7 +82,10 @@ export default async function handler(req, res) {
         사건번호: o.cltrMngNo || "",
         법원: o.orgNm || o.rqstOrgNm || "캠코 온비드",
         소재지: isMovable ? (o.onbidCltrNm || (isCar ? "차량" : "동산")) : 소재지,
-        시도: isMovable ? "" : 시도, 시군구: isMovable ? "" : 시군구, 읍면동: isMovable ? "" : (o.lctnEmdNm || "").trim(),
+        보관지: isMovable ? [o.lctnSdnm, o.lctnSggnm, o.lctnEmdNm].filter(Boolean).join(" ").trim() : "",
+        시도: isMovable ? normSido(o.lctnSdnm) : 시도,
+        시군구: isMovable ? (o.lctnSggnm || "").trim() : 시군구,
+        읍면동: (o.lctnEmdNm || "").trim(),
         용도: isMovable ? (o.cltrUsgMclsCtgrNm || o.cltrUsgSclsCtgrNm || o.cltrUsgLclsCtgrNm || 구분)
                         : (o.cltrUsgSclsCtgrNm || o.cltrUsgMclsCtgrNm || o.cltrUsgLclsCtgrNm || "기타"),
         감정가, 최저가, 최저가율: 율, 유찰: num(o.usbdNft),
