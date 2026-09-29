@@ -22,9 +22,11 @@ jobs:
         run: pip install requests pandas openpyxl
 
       - name: 경매 데이터 수집 (data.json 생성)
+        continue-on-error: true
         run: python build_data.py
 
       - name: 공매 데이터 수집 (onbid.json 생성)
+        continue-on-error: true
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
         run: python build_onbid.py

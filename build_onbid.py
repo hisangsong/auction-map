@@ -66,11 +66,14 @@ def extract(data):
     body = (data.get("response", {}) or {}).get("body") or data.get("body") or {}
     items = body.get("items", [])
     arr = items.get("item") if isinstance(items, dict) else items
-    if arr is None:
-        arr = []
     if isinstance(arr, dict):
         arr = [arr]
-    total = int(body.get("totalCount") or 0)
+    if not isinstance(arr, list):
+        arr = []
+    try:
+        total = int(body.get("totalCount") or 0)
+    except (TypeError, ValueError):
+        total = 0
     return arr, total
 
 
