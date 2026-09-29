@@ -144,7 +144,13 @@ def fetch_all() -> list[dict]:
 
     session = requests.Session()
     session.headers.update(HEADERS)
-    session.get(SEARCH_PAGE_URL, timeout=15)
+    for attempt in range(5):
+        try:
+            session.get(SEARCH_PAGE_URL, timeout=20)
+            break
+        except Exception as e:
+            print(f"  세션 수립 재시도 {attempt + 1}/5 ({e})", flush=True)
+            time.sleep(3 * (attempt + 1))
 
     all_rows: list[dict] = []
     page_no = 1
@@ -152,12 +158,28 @@ def fetch_all() -> list[dict]:
 
     while True:
         payload = build_payload(page_no, bid_bgng_ymd, bid_end_ymd)
-        resp = session.post(API_URL, json=payload, timeout=30)
-        resp.raise_for_status()
-        body = resp.json()
-
-        if body.get("status") != 200:
-            raise RuntimeError(f"API 오류: {body}")
+        # 간헐적 차단/오류(비200, JSON 파싱 실패 등)에 대비해 재시도 + 세션 재수립
+        body = None
+        last_err = None
+        for attempt in range(5):
+            try:
+                resp = session.post(API_URL, json=payload, timeout=40)
+                if resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
+                body = resp.json()
+                if body.get("status") != 200:
+                    raise RuntimeError(f"API status={body.get('status')}")
+                break
+            except Exception as e:
+                last_err = e
+                print(f"  {page_no}페이지 재시도 {attempt + 1}/5 ({e})", flush=True)
+                time.sleep(3 * (attempt + 1))
+                try:
+                    session.get(SEARCH_PAGE_URL, timeout=15)  # 세션/쿠키 재수립
+                except Exception:
+                    pass
+        if body is None:
+            raise RuntimeError(f"{page_no}페이지 조회 실패(재시도 초과): {last_err}")
 
         data = body.get("data", {})
         if total_cnt is None:
