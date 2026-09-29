@@ -26,14 +26,19 @@ export default async function handler(req, res) {
   const pvct = String(req.query.pvct || "N");          // 경쟁입찰 진행/예정 (필수)
   const sido = String(req.query.sido || "");
   const gu = String(req.query.gu || "");
-  const isCar = String(req.query.type || "") === "car"; // 차량 목록 (위치 없음, 목록전용)
-  const base = isCar ? "https://apis.data.go.kr/B010003/OnbidCarListSrvc2/getCarCltrList2" : BASE;
+  const type = String(req.query.type || "");
+  const isCar = type === "car";      // 차량 목록
+  const isAsset = type === "asset";  // 동산 목록
+  const isMovable = isCar || isAsset; // 위치 없음 → 목록전용
+  const base = isCar ? "https://apis.data.go.kr/B010003/OnbidCarListSrvc2/getCarCltrList2"
+             : isAsset ? "https://apis.data.go.kr/B010003/OnbidMvastListSrvc2/getMvastCltrList2"
+             : BASE;
 
   let url = base + "?serviceKey=" + encodeURIComponent(key) +
     "&numOfRows=" + rows + "&pageNo=" + page + "&resultType=json" +
     "&prptDivCd=" + encodeURIComponent(prpt) + "&pvctTrgtYn=" + pvct;
-  if (!isCar && sido) url += "&lctnSdnm=" + encodeURIComponent(sido);
-  if (!isCar && gu) url += "&lctnSggnm=" + encodeURIComponent(gu);
+  if (!isMovable && sido) url += "&lctnSdnm=" + encodeURIComponent(sido);
+  if (!isMovable && gu) url += "&lctnSggnm=" + encodeURIComponent(gu);
 
   try {
     const r = await fetch(url);
@@ -71,14 +76,15 @@ export default async function handler(req, res) {
       const 율 = o.apslPrcCtrsLowstBidRto != null && o.apslPrcCtrsLowstBidRto !== ""
         ? Math.round(parseFloat(o.apslPrcCtrsLowstBidRto))
         : (감정가 > 0 ? Math.round(최저가 / 감정가 * 100) : 0);
+      const 구분 = isCar ? "자동차" : isAsset ? "동산" : "공매";
       return {
-        구분: isCar ? "자동차" : "공매",
+        구분,
         사건번호: o.cltrMngNo || "",
         법원: o.orgNm || o.rqstOrgNm || "캠코 온비드",
-        소재지: isCar ? (o.onbidCltrNm || "차량") : 소재지,
-        시도: isCar ? "" : 시도, 시군구: isCar ? "" : 시군구, 읍면동: isCar ? "" : (o.lctnEmdNm || "").trim(),
-        용도: isCar ? (o.cltrUsgMclsCtgrNm || o.cltrUsgLclsCtgrNm || "자동차")
-                    : (o.cltrUsgSclsCtgrNm || o.cltrUsgMclsCtgrNm || o.cltrUsgLclsCtgrNm || "기타"),
+        소재지: isMovable ? (o.onbidCltrNm || (isCar ? "차량" : "동산")) : 소재지,
+        시도: isMovable ? "" : 시도, 시군구: isMovable ? "" : 시군구, 읍면동: isMovable ? "" : (o.lctnEmdNm || "").trim(),
+        용도: isMovable ? (o.cltrUsgMclsCtgrNm || o.cltrUsgSclsCtgrNm || o.cltrUsgLclsCtgrNm || 구분)
+                        : (o.cltrUsgSclsCtgrNm || o.cltrUsgMclsCtgrNm || o.cltrUsgLclsCtgrNm || "기타"),
         감정가, 최저가, 최저가율: 율, 유찰: num(o.usbdNft),
         매각기일: ymd(o.cltrBidEndDt),
         입찰시작: ymd(o.cltrBidBgngDt), 입찰종료: ymd(o.cltrBidEndDt),
@@ -89,15 +95,15 @@ export default async function handler(req, res) {
         차량번호: isCar ? (o.vhrnoCont || "") : "",
         연료: isCar ? (o.fuelCont || "") : "",
         변속기: isCar ? (o.pnsNm || "") : "",
-        이미지: isCar ? (o.thnlImgUrlAdr || "") : "",
+        이미지: isCar ? (o.thnlImgUrlAdr || "") : (isAsset ? (o.thnlImgUrlAdr || "") : ""),
         물건명: o.onbidCltrNm || "",
-        고유번호: (isCar ? "ONBIDCAR-" : "ONBID-") + (o.cltrMngNo || "") + "-" + (o.pbctCdtnNo || ""),
+        고유번호: (isCar ? "ONBIDCAR-" : isAsset ? "ONBIDAST-" : "ONBID-") + (o.cltrMngNo || "") + "-" + (o.pbctCdtnNo || ""),
         onbid: {
           cltrMngNo: o.cltrMngNo, pbctCdtnNo: o.pbctCdtnNo,
           onbidCltrno: o.onbidCltrno, onbidPbancNo: o.onbidPbancNo, pbctNo: o.pbctNo,
         },
       };
-    }).filter(it => isCar ? it.물건명 : (it.소재지 && it.시도));
+    }).filter(it => isMovable ? it.물건명 : (it.소재지 && it.시도));
 
     // 같은 물건(물건관리번호)이 회차별로 여러 건 → 1건으로 합침.
     // 실제 입찰일이 있는 건 우선, 그다음 최저가가 낮은(=진행된 회차) 건을 남긴다.
