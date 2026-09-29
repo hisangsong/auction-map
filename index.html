@@ -401,6 +401,7 @@
     function buildSidoSelect() {
       const sel = document.getElementById("sidoSel");
       sel.innerHTML = "";
+      const optAll = document.createElement("option"); optAll.value = "전국"; optAll.textContent = "🌐 전국"; sel.appendChild(optAll);
       DATA.sido.forEach(s => { const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o); });
       sel.onchange = () => {
         curSido = sel.value;
@@ -414,7 +415,7 @@
       const sel = document.getElementById("guSel");
       sel.innerHTML = "";
       const optAll = document.createElement("option"); optAll.value = "전체"; optAll.textContent = "＋ 시/도 전체"; sel.appendChild(optAll);
-      (DATA.guBySido[curSido] || []).forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
+      if (curSido !== "전국") (DATA.guBySido[curSido] || []).forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
       sel.onchange = () => { curGu = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
     function priceDdLabel() {
@@ -480,7 +481,7 @@
     function buildFilteredItems(opts) {
       const includeSido = !opts || opts.includeSido !== false;
       const 금액bands = 금액목록.filter((b, i) => curPriceIdxSet.has(i));
-      const 공매현재 = onbidBySido[curSido] || [];
+      const 공매현재 = curSido === "전국" ? Object.values(onbidBySido).flat() : (onbidBySido[curSido] || []);
       let base;
       if (curFavOnly) base = DATA.items.concat(Object.values(onbidBySido).flat(), carItems, assetItems);
       else if (curSrc === "공매") base = 공매현재;
@@ -495,11 +496,11 @@
         items = items.filter(it => isFav(it));
       } else if (isMovableSrc()) {
         items = items
-          .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
+          .filter(it => (!includeSido || curSido === "전국" || it.시도 === curSido) && (curGu === "전체" || it.시군구 === curGu))
           .filter(금액ok); // 동산·자동차는 보관지 기준 시/도·금액만(용도·유찰 제외)
       } else {
         items = items
-          .filter(it => (includeSido ? it.시도 === curSido : true) && (curGu === "전체" || it.시군구 === curGu))
+          .filter(it => (!includeSido || curSido === "전국" || it.시도 === curSido) && (curGu === "전체" || it.시군구 === curGu))
           .filter(it => curType === "전체" || it.분류 === curType)
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
           .filter(금액ok);
@@ -525,7 +526,7 @@
         }
       } else if (!curFavOnly && curSrc !== "경매") {
         document.getElementById("count").textContent = "온비드 공매물건 불러오는 중…";
-        await loadOnbidForSido(curSido);
+        if (curSido === "전국") await ensureOnbidStored(); else await loadOnbidForSido(curSido);
         if (onbidError) {
           showOverlay(onbidError.error === "NO_KEY" ? "🔑 공매: API 키 필요" : "공매 데이터 오류", onbidError.message || "");
         }
