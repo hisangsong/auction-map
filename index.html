@@ -375,21 +375,27 @@
     }
 
     // 온비드 차량 목록(위치 없음, 목록전용)을 한 번만 불러온다.
-    async function ensureCarLoaded() {
-      if (carLoaded === true) { onbidError = null; return; } // 성공은 캐시, 실패는 재시도
+    // 저장본(car.json/asset.json) 우선, 없으면 라이브(/api/onbid?type=)로 폴백
+    async function loadMovable(file, apiType) {
       try {
-        const j = await (await fetch("/api/onbid?type=car&rows=1000")).json();
-        if (j.error) { onbidError = j; carItems = []; carLoaded = false; return; }
-        onbidError = null; carItems = (j.items || []); carLoaded = true;
-      } catch (e) { onbidError = { message: String(e) }; carItems = []; carLoaded = false; }
+        const res = await fetch(file, { cache: "no-cache" });
+        if (res.ok) { const j = await res.json(); if ((j.items || []).length) { onbidError = null; return { items: j.items, ok: true }; } }
+      } catch (e) {}
+      try {
+        const j = await (await fetch("/api/onbid?type=" + apiType + "&rows=1000")).json();
+        if (j.error) { onbidError = j; return { items: [], ok: false }; }
+        onbidError = null; return { items: (j.items || []), ok: true };
+      } catch (e) { onbidError = { message: String(e) }; return { items: [], ok: false }; }
+    }
+    async function ensureCarLoaded() {
+      if (carLoaded === true) { onbidError = null; return; }
+      const r = await loadMovable("car.json", "car");
+      carItems = r.items; carLoaded = r.ok;
     }
     async function ensureAssetLoaded() {
       if (assetLoaded === true) { onbidError = null; return; }
-      try {
-        const j = await (await fetch("/api/onbid?type=asset&rows=1000")).json();
-        if (j.error) { onbidError = j; assetItems = []; assetLoaded = false; return; }
-        onbidError = null; assetItems = (j.items || []); assetLoaded = true;
-      } catch (e) { onbidError = { message: String(e) }; assetItems = []; assetLoaded = false; }
+      const r = await loadMovable("asset.json", "asset");
+      assetItems = r.items; assetLoaded = r.ok;
     }
 
     function buildSidoSelect() {
