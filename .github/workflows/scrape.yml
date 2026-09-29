@@ -21,15 +21,17 @@ jobs:
       - name: 의존성 설치
         run: pip install requests pandas openpyxl
 
-      - name: 경매 데이터 수집 (data.json 생성)
-        continue-on-error: true
-        run: python build_data.py
-
       - name: 공매 데이터 수집 (onbid.json 생성)
         continue-on-error: true
+        timeout-minutes: 15
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
         run: python build_onbid.py
+
+      - name: 경매 데이터 수집 (data.json 생성)
+        continue-on-error: true
+        timeout-minutes: 25
+        run: python build_data.py
 
       - name: 변경사항 커밋 및 푸시
         run: |
