@@ -108,6 +108,13 @@ def main():
     items = transform(rows)
     sido_list, gu_by_sido = build_sido_gu_index(items)
 
+    # 좌표 미리 저장(있을 때) - 프런트에서 실시간 변환 없이 지도 즉시 표시
+    try:
+        from geocode_util import geocode_items
+        geocode_items(items, lambda it: it.get("소재지"))
+    except Exception as e:
+        print("좌표 프리스토어 건너뜀:", e, flush=True)
+
     data = {
         "sido": sido_list,
         "guBySido": gu_by_sido,

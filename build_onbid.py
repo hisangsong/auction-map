@@ -244,14 +244,31 @@ def main():
 
     items = list(by_no.values())
     today = datetime.date.today().strftime("%Y-%m-%d")
+
+    try:
+        from geocode_util import geocode_items
+    except Exception:
+        geocode_items = None
+
+    if geocode_items:
+        try:
+            geocode_items(items, lambda it: it.get("소재지"))
+        except Exception as e:
+            print("공매 좌표 프리스토어 건너뜀:", e, flush=True)
+
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"items": items, "updatedAt": today}, f, ensure_ascii=False)
     print(f"완료: 공매(부동산) {len(items)}건 저장 -> {OUT}", flush=True)
 
-    # 동산·자동차(위치 없음) 저장본 생성
+    # 동산·자동차(보관지 기준) 저장본 생성 + 보관지 좌표 프리스토어
     for base, gubun, fname in [(ASSET_BASE, "동산", "asset.json"), (CAR_BASE, "자동차", "car.json")]:
         try:
             mv = collect_movable(base, gubun)
+            if geocode_items:
+                try:
+                    geocode_items(mv, lambda it: it.get("보관지") or it.get("소재지"))
+                except Exception as e:
+                    print(f"{gubun} 좌표 프리스토어 건너뜀:", e, flush=True)
             with open(DIR / fname, "w", encoding="utf-8") as f:
                 json.dump({"items": mv, "updatedAt": today}, f, ensure_ascii=False)
             print(f"완료: {gubun} {len(mv)}건 저장 -> {fname}", flush=True)
