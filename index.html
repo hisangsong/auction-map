@@ -146,6 +146,8 @@
     <select id="srcSel"></select>
     <select id="sidoSel"></select>
     <select id="guSel"></select>
+    <input id="searchInput" type="search" placeholder="🔎 주소·물건명·사건번호" oninput="onSearchInput(this.value)"
+      style="font-family:inherit;font-size:13px;color:var(--text);background:var(--panel2);border:1px solid var(--line);padding:7px 12px;border-radius:8px;min-width:150px;">
     <div class="price-dd" id="priceDd">
       <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
       <div class="price-dd-panel" id="priceDdPanel"></div>
@@ -153,6 +155,8 @@
     <button type="button" class="fav-toggle" id="recBtn">⭐ 추천물건</button>
     <button type="button" class="fav-toggle" id="favToggleBtn"></button>
     <button type="button" class="fav-toggle" id="compareBtn" onclick="openCompare()">📋 비교·일정</button>
+    <button type="button" class="fav-toggle" id="shareBtn" onclick="shareView()">🔗 공유</button>
+    <button type="button" class="fav-toggle" id="infoBtn" onclick="showInfo()" title="안내">ℹ️</button>
     <div class="filters" id="filters"></div>
     <div class="filters" id="yuchalFilters"></div>
   </header>
@@ -293,6 +297,66 @@
       return curSido + (curGu === "전체" ? " 전체" : " " + curGu);
     }
 
+    /* ---------- 검색 ---------- */
+    let curQuery = "", searchTimer = null;
+    function onSearchInput(v) {
+      curQuery = (v || "").trim().toLowerCase();
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { activeIdx = -1; apply(); }, 250);
+    }
+
+    /* ---------- 공유(딥링크) ---------- */
+    function writeHash(itemId) {
+      const p = new URLSearchParams();
+      if (curSrc !== "전체") p.set("src", curSrc);
+      if (curSido) p.set("sido", curSido);
+      if (curGu !== "전체") p.set("gu", curGu);
+      if (curType !== "전체") p.set("ut", curType);
+      if (curYuchal !== "전체") p.set("yc", curYuchal);
+      if (curQuery) p.set("q", curQuery);
+      if (!curPriceIdxSet.has(0)) p.set("pr", [...curPriceIdxSet].join(","));
+      if (curRecOnly) p.set("rec", "1");
+      if (curFavOnly) p.set("fav", "1");
+      if (itemId) p.set("item", itemId);
+      history.replaceState(null, "", "#" + p.toString());
+    }
+    function applyHashState() {
+      const h = location.hash.replace(/^#/, ""); if (!h) return null;
+      const p = new URLSearchParams(h);
+      if (p.get("src")) { curSrc = p.get("src"); const s = document.getElementById("srcSel"); if (s) s.value = curSrc; }
+      if (p.get("sido")) { curSido = p.get("sido"); document.getElementById("sidoSel").value = curSido; buildGuSelect(); }
+      if (p.get("gu")) { curGu = p.get("gu"); document.getElementById("guSel").value = curGu; }
+      if (p.get("ut")) curType = p.get("ut");
+      if (p.get("yc")) curYuchal = p.get("yc");
+      if (p.get("q")) { curQuery = p.get("q").toLowerCase(); document.getElementById("searchInput").value = p.get("q"); }
+      if (p.get("pr")) { curPriceIdxSet = new Set(p.get("pr").split(",").map(Number)); buildPriceSelect(); }
+      if (p.get("rec") === "1") { curRecOnly = true; document.getElementById("recBtn").classList.add("active"); }
+      if (p.get("fav") === "1") { curFavOnly = true; updateFavToggleLabel(); updateFilterControlsDisabled(); }
+      return p.get("item");
+    }
+    function openItemById(id) {
+      if (!id) return;
+      const all = DATA.items.concat(Object.values(onbidBySido).flat(), carItems, assetItems);
+      const it = all.find(x => x.고유번호 === id);
+      if (it) { curDetailItem = it; showDetail(it); if (map && it.lat != null) map.panTo(new kakao.maps.LatLng(it.lat, it.lng)); }
+    }
+    function shareView() {
+      writeHash(curDetailItem ? curDetailItem.고유번호 : null);
+      const url = location.href;
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => window.alert("현재 화면 링크를 복사했어요!\n\n" + url)).catch(() => window.prompt("링크 복사:", url));
+      else window.prompt("링크 복사:", url);
+    }
+    function showInfo() {
+      const up = DATA.updatedAt || "-";
+      window.alert(
+        "전국 경매·공매 지도\n\n" +
+        "· 데이터 기준일: " + up + " (매일 자동 갱신)\n" +
+        "· 출처: 대법원 법원경매정보 · 캠코 온비드 · 국토교통부 실거래가\n\n" +
+        "⚠️ 이 앱의 정보는 공개데이터 기반 참고자료이며 법적 효력이 없습니다.\n" +
+        "입찰 전 반드시 매각물건명세서·감정평가서·등기사항전부증명서 원본을 직접 확인하세요."
+      );
+    }
+
     function loadKakao() {
       const s = document.createElement("script");
       s.src = "//dapi.kakao.com/v2/maps/sdk.js?appkey=" + KAKAO_APP_KEY + "&autoload=false&libraries=services";
@@ -308,7 +372,7 @@
       try {
         DATA = await (await fetch("data.json")).json();
       } catch (e) { showOverlay("데이터 로딩 실패", "data.json 을 불러오지 못했습니다: " + e); return; }
-      document.getElementById("srcBadge").textContent = "전국 법원경매 실데이터 " + DATA.items.length.toLocaleString() + "건";
+      document.getElementById("srcBadge").textContent = "경매 " + DATA.items.length.toLocaleString() + "건" + (DATA.updatedAt ? " · " + DATA.updatedAt + " 기준" : "");
       buildSidoSelect();
       curSido = DATA.sido[0] || "";
       document.getElementById("sidoSel").value = curSido;
@@ -327,7 +391,9 @@
         activeIdx = -1; closeDetail(); apply();
       };
       updateFavToggleLabel();
-      apply();
+      const pendingItem = applyHashState(); // 공유 링크의 필터/물건 복원
+      await apply();
+      openItemById(pendingItem);
     }
 
     function updateFilterControlsDisabled() {
@@ -512,6 +578,8 @@
           .filter(금액ok);
       }
       if (curRecOnly) items = items.filter(추천가능);
+      if (curQuery) items = items.filter(it =>
+        ((it.소재지 || "") + " " + (it.물건명 || "") + " " + (it.사건번호 || "") + " " + (it.보관지 || "")).toLowerCase().includes(curQuery));
       return items;
     }
 
@@ -559,6 +627,7 @@
         }
       }
       render();
+      writeHash(null);
     }
 
     function geocodeP(query, tries) {
@@ -799,6 +868,7 @@
         setTimeout(() => { suppressMapMoveEvent = false; }, 600);
       }
       showDetail(it); render();
+      writeHash(it.고유번호);
     }
 
     /* ---------- 입찰 판단 도우미 (전문가용) ---------- */
