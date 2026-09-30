@@ -57,7 +57,7 @@ def _geocode_one(q):
     return None
 
 
-def geocode_items(items, addr_fn, max_new=8000, workers=8):
+def geocode_items(items, addr_fn, max_new=40000, workers=8):
     """items 각 원소에 lat/lng를 채운다. 캐시에 있으면 재사용, 없으면 신규 호출(최대 max_new)."""
     if not KEY:
         print("KAKAO_REST_KEY 없음 - 좌표 프리스토어 건너뜀", flush=True)
