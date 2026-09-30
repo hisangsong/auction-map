@@ -15,7 +15,8 @@ import requests
 
 CACHE_PATH = Path(__file__).parent / "geocache.json"
 KEY = os.environ.get("KAKAO_REST_KEY")
-_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+_KW_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+_ADDR_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 
 
 def load_cache():
@@ -43,17 +44,31 @@ def _variants(q):
     return seen
 
 
+def _one_req(url, query):
+    try:
+        r = requests.get(url, params={"query": query, "size": 1},
+                         headers={"Authorization": "KakaoAK " + KEY}, timeout=10)
+        if r.status_code == 200:
+            docs = r.json().get("documents", [])
+            if docs:
+                return [float(docs[0]["y"]), float(docs[0]["x"])]
+    except Exception:
+        pass
+    return None
+
+
 def _geocode_one(q):
-    for query in _variants(q):
-        try:
-            r = requests.get(_URL, params={"query": query, "size": 1},
-                             headers={"Authorization": "KakaoAK " + KEY}, timeout=10)
-            if r.status_code == 200:
-                docs = r.json().get("documents", [])
-                if docs:
-                    return [float(docs[0]["y"]), float(docs[0]["x"])]
-        except Exception:
-            pass
+    variants = _variants(q)
+    # 1) 주소 지오코딩(지번/도로명을 정확히 매칭 → 확대해도 번지에 핀이 맞음)
+    for query in variants:
+        v = _one_req(_ADDR_URL, query)
+        if v:
+            return v
+    # 2) 키워드 검색 폴백(주소가 군더더기 포함 등으로 실패할 때)
+    for query in variants:
+        v = _one_req(_KW_URL, query)
+        if v:
+            return v
     return None
 
 

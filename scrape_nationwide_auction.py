@@ -11,9 +11,13 @@ scrape_seoul_auction.py 와 동일한 공개 JSON API(searchControllerMain.on)�
 - 사이트 특성상 매각기일이 오늘~2주 후까지인 공고중 물건만 조회 가능.
 """
 
+import os
 import sys
 import time
+import random
 import datetime
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import requests
@@ -137,66 +141,116 @@ def build_payload(page_no: int, bid_bgng_ymd: str, bid_end_ymd: str) -> dict:
     }
 
 
-def fetch_all() -> list[dict]:
-    today = datetime.date.today()
-    bid_bgng_ymd = today.strftime("%Y%m%d")
-    bid_end_ymd = (today + datetime.timedelta(days=14)).strftime("%Y%m%d")
+# 동시에 여러 페이지를 받되, 스레드마다 별도 세션(쿠키)을 쓴다.
+# 하나의 requests.Session 을 여러 스레드가 공유하면 안전하지 않기 때문.
+_thread_local = threading.local()
 
-    session = requests.Session()
-    session.headers.update(HEADERS)
+# 페이지를 순차로 받으면 772페이지 × ~2.6초 ≈ 25분이 걸린다. 각 페이지 요청은
+# pageNo 를 payload 에 담아 독립적이므로, 병렬로 나눠 받으면 몇 분으로 줄어든다.
+# courtauction 의 부하/차단을 고려해 동시성은 보수적으로(기본 6) 둔다.
+PAGE_WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
+
+
+def _get_session() -> requests.Session:
+    s = getattr(_thread_local, "session", None)
+    if s is None:
+        s = requests.Session()
+        s.headers.update(HEADERS)
+        try:
+            s.get(SEARCH_PAGE_URL, timeout=20)  # 세션/쿠키 수립
+        except Exception:
+            pass
+        _thread_local.session = s
+    return s
+
+
+def _fetch_page(page_no: int, bgng: str, end: str) -> list[dict]:
+    """한 페이지를 재시도와 함께 받아 rows(list) 를 돌려준다. 실패하면 예외."""
+    payload = build_payload(page_no, bgng, end)
+    last_err = None
     for attempt in range(5):
         try:
-            session.get(SEARCH_PAGE_URL, timeout=20)
+            session = _get_session()
+            resp = session.post(API_URL, json=payload, timeout=40)
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}")
+            body = resp.json()
+            if body.get("status") != 200:
+                raise RuntimeError(f"API status={body.get('status')}")
+            return body.get("data", {}).get("dlt_srchResult") or []
+        except Exception as e:
+            last_err = e
+            print(f"  {page_no}페이지 재시도 {attempt + 1}/5 ({e})", flush=True)
+            time.sleep(2 * (attempt + 1) + random.random())
+            _thread_local.session = None  # 세션 재수립 유도
+    raise RuntimeError(f"{page_no}페이지 조회 실패(재시도 초과): {last_err}")
+
+
+def fetch_all() -> list[dict]:
+    today = datetime.date.today()
+    bgng = today.strftime("%Y%m%d")
+    end = (today + datetime.timedelta(days=14)).strftime("%Y%m%d")
+
+    # 1페이지: 전체 건수와 첫 결과를 먼저 확보한다.
+    first_payload = build_payload(1, bgng, end)
+    body = None
+    last_err = None
+    for attempt in range(5):
+        try:
+            resp = _get_session().post(API_URL, json=first_payload, timeout=40)
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}")
+            body = resp.json()
+            if body.get("status") != 200:
+                raise RuntimeError(f"API status={body.get('status')}")
             break
         except Exception as e:
-            print(f"  세션 수립 재시도 {attempt + 1}/5 ({e})", flush=True)
+            last_err = e
+            print(f"  1페이지 재시도 {attempt + 1}/5 ({e})", flush=True)
             time.sleep(3 * (attempt + 1))
+            _thread_local.session = None
+    if body is None:
+        raise RuntimeError(f"1페이지 조회 실패(재시도 초과): {last_err}")
 
-    all_rows: list[dict] = []
-    page_no = 1
-    total_cnt = None
+    data = body.get("data", {})
+    total_cnt = int(data.get("dma_pageInfo", {}).get("totalCnt") or 0)
+    total_pages = (total_cnt + PAGE_SIZE - 1) // PAGE_SIZE
+    print(f"총 물건 수: {total_cnt}건 (예상 페이지: {total_pages}, 동시 {PAGE_WORKERS})", flush=True)
 
-    while True:
-        payload = build_payload(page_no, bid_bgng_ymd, bid_end_ymd)
-        # 간헐적 차단/오류(비200, JSON 파싱 실패 등)에 대비해 재시도 + 세션 재수립
-        body = None
-        last_err = None
-        for attempt in range(5):
-            try:
-                resp = session.post(API_URL, json=payload, timeout=40)
-                if resp.status_code != 200:
-                    raise RuntimeError(f"HTTP {resp.status_code}")
-                body = resp.json()
-                if body.get("status") != 200:
-                    raise RuntimeError(f"API status={body.get('status')}")
-                break
-            except Exception as e:
-                last_err = e
-                print(f"  {page_no}페이지 재시도 {attempt + 1}/5 ({e})", flush=True)
-                time.sleep(3 * (attempt + 1))
-                try:
-                    session.get(SEARCH_PAGE_URL, timeout=15)  # 세션/쿠키 재수립
-                except Exception:
-                    pass
-        if body is None:
-            raise RuntimeError(f"{page_no}페이지 조회 실패(재시도 초과): {last_err}")
+    all_rows: list[dict] = list(data.get("dlt_srchResult") or [])
+    if total_pages <= 1:
+        return all_rows
 
-        data = body.get("data", {})
-        if total_cnt is None:
-            total_cnt = int(data.get("dma_pageInfo", {}).get("totalCnt") or 0)
-            print(f"총 물건 수: {total_cnt}건 (예상 페이지: {(total_cnt + PAGE_SIZE - 1)//PAGE_SIZE})", flush=True)
+    # 2..N 페이지를 병렬로 수집한다. 순서는 무관.
+    done = [1]
+    failed: list[int] = []
+    lock = threading.Lock()
 
-        rows = data.get("dlt_srchResult") or []
-        all_rows.extend(rows)
-        if page_no % 10 == 0 or not rows:
-            print(f"  {page_no}페이지 수집 완료 (누적 {len(all_rows)}/{total_cnt}건)", flush=True)
+    def work(p: int):
+        try:
+            rows = _fetch_page(p, bgng, end)
+        except Exception as e:
+            with lock:
+                failed.append(p)
+            print(f"  {p}페이지 최종 실패: {e}", flush=True)
+            return
+        with lock:
+            all_rows.extend(rows)
+            done[0] += 1
+            if done[0] % 20 == 0:
+                print(f"  진행 {done[0]}/{total_pages}페이지 (누적 {len(all_rows)}건)", flush=True)
 
-        if not rows or len(all_rows) >= total_cnt:
-            break
+    with ThreadPoolExecutor(max_workers=PAGE_WORKERS) as ex:
+        list(ex.map(work, range(2, total_pages + 1)))
 
-        page_no += 1
-        time.sleep(REQUEST_DELAY_SEC)
+    # 실패한 페이지는 마지막에 순차로 한 번 더 시도(부하 완화).
+    for p in failed:
+        try:
+            all_rows.extend(_fetch_page(p, bgng, end))
+        except Exception as e:
+            print(f"  {p}페이지 재시도도 실패(건너뜀): {e}", flush=True)
 
+    print(f"수집 완료: {len(all_rows)}/{total_cnt}건", flush=True)
     return all_rows
 
 

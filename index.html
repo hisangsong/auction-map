@@ -858,14 +858,35 @@
       renderAlertBanner();
     }
 
+    // 주소→좌표. 주소 지오코딩(addressSearch)이 지번/도로명을 더 정확히 잡아
+    // 확대해도 실제 번지에 핀이 맞는다. 실패 시 키워드검색으로 폴백한다.
+    // (뒤 토큰의 '201호·다세대주택' 같은 군더더기를 하나씩 떼며 재시도)
     function geocodeP(query, tries) {
       return new Promise(resolve => {
-        places.keywordSearch(query, (data, status) => {
-          if (status === kakao.maps.services.Status.OK && data.length) { resolve({ lat:+data[0].y, lng:+data[0].x }); return; }
-          const parts = query.trim().split(/\s+/);
-          if (parts.length > 2 && tries > 0) geocodeP(parts.slice(0,-1).join(" "), tries-1).then(resolve);
-          else resolve(null);
-        });
+        const q = (query || "").trim();
+        if (!q) { resolve(null); return; }
+        const toks = q.split(/\s+/);
+        const geocoder = new kakao.maps.services.Geocoder();
+        const addrTry = (n) => {
+          if (n < 3) return keyword();
+          geocoder.addressSearch(toks.slice(0, n).join(" "), (res, st) => {
+            if (st === kakao.maps.services.Status.OK && res.length)
+              return resolve({ lat: +res[0].y, lng: +res[0].x });
+            addrTry(n - 1);
+          });
+        };
+        const keyword = () => {
+          const kwTry = (n) => {
+            if (n < 2) return resolve(null);
+            places.keywordSearch(toks.slice(0, n).join(" "), (data, status) => {
+              if (status === kakao.maps.services.Status.OK && data.length)
+                return resolve({ lat: +data[0].y, lng: +data[0].x });
+              kwTry(n - 1);
+            });
+          };
+          kwTry(toks.length);
+        };
+        addrTry(toks.length);
       });
     }
 
@@ -981,6 +1002,7 @@
     let suppressMapMoveEvent = false;
     let userMovedMap = false;   // 사용자가 직접 확대/이동했는지 (true면 render가 지도를 되돌리지 않음)
     const MAP_RESEARCH_MAX_GEOCODE = 200; // 재검색 시 추가로 좌표를 구할 최대 물건 수(비용 고려)
+    const AUTO_RESEARCH_LEVEL = 6;        // 이 레벨 이하로 확대하면 화면 내 물건 자동 재검색
 
     let researchTimer = null, researching = false;
     function setupMapMoveWatcher() {
@@ -988,8 +1010,10 @@
         if (suppressMapMoveEvent) return;
         userMovedMap = true;
         document.getElementById("mapResearchBtn").hidden = false; // 버튼은 항상 보이게
-        if (mapSearchActive) {
-          // 지도 검색 모드: 지도를 움직이면 그 영역을 자동으로도 다시 검색
+        // 확대(레벨↓)해서 동네 단위로 보면, 상단 CAP(80) 물건만 흩어져 보이는 대신
+        // 실제 그 화면 안의 물건을 자동으로 불러와 핀이 주소와 맞도록 한다.
+        const zoomedIn = map.getLevel() <= AUTO_RESEARCH_LEVEL;
+        if (mapSearchActive || zoomedIn) {
           clearTimeout(researchTimer);
           researchTimer = setTimeout(() => researchInMapBounds(true), 500);
         }
@@ -1442,9 +1466,13 @@
 
     function openOnbid(it) {
       if (!it) return;
-      const no = it.사건번호 || "";
+      // 물건관리번호(cltrMngNo)로 온비드 물건검색을 바로 실행한다.
+      // 기존 selectAdvancedSearch.do 는 온비드 개편으로 404가 나서 연결이 안 됐다.
+      const no = (it.onbid && it.onbid.cltrMngNo) || it.사건번호 || "";
       if (navigator.clipboard && no) navigator.clipboard.writeText(no).catch(() => {});
-      window.open("https://www.onbid.co.kr/op/ppa/selectAdvancedSearch.do", "_blank", "noopener");
+      const base = "https://www.onbid.co.kr/op/cltrpbancinf/cltr/cltrcdtnsrch/CltrCdtnSrchController/mvmnCltrCdtnSrchClg.do";
+      const url = no ? base + "?srchCltrMnmtNo=" + encodeURIComponent(no) : base;
+      window.open(url, "_blank", "noopener");
     }
 
     // 자동차(온비드) 상세 - 위치가 없으므로 지도/입찰판단 없이 차량정보+온비드 링크
