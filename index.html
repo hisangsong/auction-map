@@ -150,6 +150,7 @@
       <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
       <div class="price-dd-panel" id="priceDdPanel"></div>
     </div>
+    <button type="button" class="fav-toggle" id="recBtn">⭐ 추천물건</button>
     <button type="button" class="fav-toggle" id="favToggleBtn"></button>
     <button type="button" class="fav-toggle" id="compareBtn" onclick="openCompare()">📋 비교·일정</button>
     <div class="filters" id="filters"></div>
@@ -232,7 +233,7 @@
     ];
 
     let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], shownNatural = [], curSort = "default", curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
-    let curSrc = "전체", onbidBySido = {}, onbidError = null, carItems = [], carLoaded = null, assetItems = [], assetLoaded = null;
+    let curSrc = "전체", onbidBySido = {}, onbidError = null, carItems = [], carLoaded = null, assetItems = [], assetLoaded = null, curRecOnly = false;
     const 구분색 = { 경매:"#38bdf8", 공매:"#a78bfa", 자동차:"#f59e0b", 동산:"#14b8a6" };
     const isMovableSrc = () => curSrc === "자동차" || curSrc === "동산";
 
@@ -319,6 +320,11 @@
       document.getElementById("favToggleBtn").onclick = () => {
         curFavOnly = !curFavOnly;
         activeIdx = -1; closeDetail(); updateFavToggleLabel(); updateFilterControlsDisabled(); apply();
+      };
+      document.getElementById("recBtn").onclick = () => {
+        curRecOnly = !curRecOnly;
+        document.getElementById("recBtn").classList.toggle("active", curRecOnly);
+        activeIdx = -1; closeDetail(); apply();
       };
       updateFavToggleLabel();
       apply();
@@ -505,6 +511,7 @@
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
           .filter(금액ok);
       }
+      if (curRecOnly) items = items.filter(추천가능);
       return items;
     }
 
@@ -533,8 +540,13 @@
       }
       const all = buildFilteredItems();
       lastTotal = all.length;
-      shownNatural = capByRegion(all, CAP);
-      applySort();
+      if (curRecOnly) {
+        shownNatural = all.slice().sort((a, b) => 추천점수(b) - 추천점수(a)).slice(0, CAP);
+        shown = shownNatural.slice();
+      } else {
+        shownNatural = capByRegion(all, CAP);
+        applySort();
+      }
       const 표시 = lastTotal > shown.length ? lastTotal + "건 중 " + shown.length + "건" : shown.length + "건";
       document.getElementById("count").textContent = 지역라벨() + " · " + 표시 + " · 위치 찾는 중…";
       renderList();
@@ -600,7 +612,8 @@
           '<button class="fav-star'+(isFav(it)?' active':'')+'" title="관심목록">'+(isFav(it)?'★':'☆')+'</button></div>'+
           '<div class="addr">'+it.소재지+'</div>'+
           '<div class="row2"><span class="price">'+억(it.최저가)+' <span class="meta">('+it.최저가율+'%)</span></span>'+
-          '<span class="meta">'+it.유찰구분+' · '+it.매각기일+'</span></div>';
+          '<span class="meta">'+it.유찰구분+' · '+it.매각기일+'</span></div>'+
+          (curRecOnly ? '<div class="meta" style="color:#fbbf24;margin-top:5px;">⭐ '+추천사유(it)+'</div>' : '');
         el.onclick = () => selectItem(i);
         el.querySelector(".fav-star").onclick = (e) => { e.stopPropagation(); toggleFav(it); };
         list.appendChild(el);
@@ -825,6 +838,30 @@
     }
     // 용도별 평균 낙찰가율(감정가 대비) - 통계 기반 참고 근사치
     const 낙찰가율참고 = { 아파트: 0.87, 주택: 0.75, 상가: 0.68, 토지: 0.72, 기타: 0.70 };
+
+    // 추천 점수: 감정가 대비 저감율↑ + 유찰 가점 - 특수권리 감점 (+주거용/매각임박 가점)
+    function 추천점수(it) {
+      const 감 = it.감정가 || 0, 최 = it.최저가 || 0;
+      if (!감 || !최) return -1;
+      const 저감 = (1 - 최 / 감) * 100;
+      let s = 저감;
+      s += Math.min(it.유찰 || 0, 3) * 4;
+      s -= riskFlags(it).length * 15;
+      if (it.분류 === "아파트" || it.분류 === "주택") s += 6; // 환금성
+      if (it.매각기일) s += 3;
+      return s;
+    }
+    function 추천가능(it) {
+      const 감 = it.감정가 || 0, 최 = it.최저가 || 0;
+      return 감 > 0 && 최 > 0 && (1 - 최 / 감) * 100 >= 20 && riskFlags(it).length === 0;
+    }
+    function 추천사유(it) {
+      const 저감 = it.감정가 ? Math.round((1 - it.최저가 / it.감정가) * 100) : 0;
+      const parts = ["감정가 대비 " + 저감 + "%↓"];
+      if (it.유찰 > 0) parts.push("유찰 " + it.유찰 + "회");
+      parts.push("특수권리 없음");
+      return parts.join(" · ");
+    }
     function bidHelperHtml(it) {
       const sqm = parseSqm(it.면적구조);
       const py = sqm ? sqm / 3.305785 : 0;
