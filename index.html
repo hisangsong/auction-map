@@ -152,6 +152,7 @@
       <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
       <div class="price-dd-panel" id="priceDdPanel"></div>
     </div>
+    <select id="areaSel" onchange="onAreaChange(this.value)"></select>
     <button type="button" class="fav-toggle" id="recBtn">⭐ 추천물건</button>
     <button type="button" class="fav-toggle" id="favToggleBtn"></button>
     <button type="button" class="fav-toggle" id="compareBtn" onclick="openCompare()">📋 비교·일정</button>
@@ -235,6 +236,15 @@
       { label: "5억~10억", min: 5e8, max: 1e9 },
       { label: "10억 이상", min: 1e9, max: Infinity },
     ];
+    const 면적목록 = [
+      { label: "면적(평) 전체", min: 0, max: Infinity },
+      { label: "~10평", min: 0, max: 10 },
+      { label: "10~20평", min: 10, max: 20 },
+      { label: "20~30평", min: 20, max: 30 },
+      { label: "30~40평", min: 30, max: 40 },
+      { label: "40평 이상", min: 40, max: Infinity },
+    ];
+    let curAreaIdx = 0;
 
     let map, places, DATA = { sido:[], guBySido:{}, items:[] }, shown = [], shownNatural = [], curSort = "default", curSido = "", curGu = "전체", curType = "전체", curYuchal = "전체", curPriceIdxSet = new Set([0]), curFavOnly = false, activeIdx = -1, lastTotal = 0;
     let curSrc = "전체", onbidBySido = {}, onbidError = null, carItems = [], carLoaded = null, assetItems = [], assetLoaded = null, curRecOnly = false;
@@ -380,6 +390,7 @@
       curGu = "전체";
       document.getElementById("guSel").value = curGu;
       buildPriceSelect();
+      buildAreaSelect();
       buildSrcSelect();
       document.getElementById("favToggleBtn").onclick = () => {
         curFavOnly = !curFavOnly;
@@ -414,6 +425,12 @@
       sel.value = curSrc;
       sel.onchange = () => { curSrc = sel.value; activeIdx = -1; closeDetail(); apply(); };
     }
+    function buildAreaSelect() {
+      const sel = document.getElementById("areaSel"); sel.innerHTML = "";
+      면적목록.forEach((b, i) => { const o = document.createElement("option"); o.value = i; o.textContent = b.label; sel.appendChild(o); });
+      sel.value = curAreaIdx;
+    }
+    function onAreaChange(v) { curAreaIdx = +v; activeIdx = -1; apply(); }
 
     // 매일 저장되는 onbid.json(전국 공매)을 한 번만 불러와 시/도별로 묶는다.
     let onbidStored = null; // null=미시도, true=저장파일 사용, false=라이브 폴백
@@ -575,7 +592,13 @@
           .filter(it => (!includeSido || curSido === "전국" || it.시도 === curSido) && (curGu === "전체" || it.시군구 === curGu))
           .filter(it => curType === "전체" || it.분류 === curType)
           .filter(it => curYuchal === "전체" || it.유찰구분 === curYuchal)
-          .filter(금액ok);
+          .filter(금액ok)
+          .filter(it => {
+            if (curAreaIdx === 0) return true;
+            const py = parseSqm(it.면적구조) / 3.305785;
+            const b = 면적목록[curAreaIdx];
+            return py > 0 && py >= b.min && py < b.max;
+          });
       }
       if (curRecOnly) items = items.filter(추천가능);
       if (curQuery) items = items.filter(it =>
@@ -882,16 +905,19 @@
       if (isNaN(d)) return null;
       return Math.ceil((d - new Date(new Date().toDateString())) / 86400000);
     }
-    function acqTaxRate(분류, price) { // 취득세율(참고 추정치)
-      if (분류 === "아파트" || 분류 === "주택") {
-        if (price <= 6e8) return 0.011;      // 6억 이하 주택
-        if (price <= 9e8) return 0.022;      // 6~9억
-        return 0.035;                        // 9억 초과
-      }
-      return 0.046;                          // 상가·토지·기타(4.6%)
+    // 취득세율(참고 추정치). sqm=전용면적(㎡), multi=다주택 중과 여부
+    function acqTaxRate(분류, price, sqm, multi) {
+      const 주택 = (분류 === "아파트" || 분류 === "주택");
+      if (!주택) return 0.046;                // 상가·토지·기타: 취득4%+농특0.2%+교육0.4%
+      const 대형 = sqm ? sqm > 85 : false;    // 전용 85㎡ 초과 → 농특세 0.2% 가산
+      if (multi) return 대형 ? 0.090 : 0.084; // 다주택 중과(조정2주택 8%+농특/교육 근사)
+      // 1주택: 취득 본세 + 지방교육세(본세의 10%)
+      let r = price <= 6e8 ? 0.011 : price <= 9e8 ? 0.022 : 0.033;
+      if (대형) r += 0.002;                   // 85㎡ 초과 농특세
+      return r;
     }
-    function costBreakdown(price, 분류) {
-      const 취득세 = Math.round(price * acqTaxRate(분류, price));
+    function costBreakdown(price, 분류, sqm, multi) {
+      const 취득세 = Math.round(price * acqTaxRate(분류, price, sqm, multi));
       const 등기법무 = Math.round(price * 0.006);   // 등기수수료·채권·법무사 대략
       const 명도 = 2000000;                          // 명도/이사비 추정(경매)
       return { 취득세, 등기법무, 명도, 총: price + 취득세 + 등기법무 + 명도 };
@@ -951,8 +977,19 @@
       h += '<div style="font-size:12px;color:var(--muted);margin:8px 0 4px;">입찰가 입력 → 총 취득원가 계산</div>';
       h += '<input id="bidInput" type="number" value="' + p0 + '" oninput="updateBidCalc()" ' +
            'style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;">';
+      const 주택물건 = (it.분류 === "아파트" || it.분류 === "주택");
+      if (주택물건) h += '<label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:var(--muted);cursor:pointer;">' +
+        '<input id="multiChk" type="checkbox" onchange="updateBidCalc()" style="width:15px;height:15px;">다주택자(조정지역 중과세율 적용)</label>';
       h += '<div id="bidCalcResult" style="margin-top:8px;"></div>';
       h += '<div class="doc-msg">※ 취득세·등기·명도비는 참고 추정치입니다.</div>';
+      // 대출 계산기 (LTV·금리·기간)
+      const lnS = 'padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;width:100%;';
+      h += '<div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">🏦 대출 계산기(선택): LTV(%) / 금리(%) / 기간(년)</div>';
+      h += '<div style="display:flex;gap:6px;">' +
+           '<input id="ltvInput" type="number" placeholder="LTV %" value="70" oninput="updateBidCalc()" style="' + lnS + '">' +
+           '<input id="rateInput" type="number" step="0.1" placeholder="금리 %" value="4.5" oninput="updateBidCalc()" style="' + lnS + '">' +
+           '<input id="yearInput" type="number" placeholder="기간 년" value="30" oninput="updateBidCalc()" style="' + lnS + '"></div>';
+      h += '<div id="loanResult" style="margin-top:8px;"></div>';
       // 수익률 계산기 (임대 가정)
       const inS = 'padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;width:100%;';
       h += '<div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">임대 수익률(선택): 보증금 / 월세 (만원)</div>';
@@ -1034,7 +1071,9 @@
       const it = curDetailItem; if (!it) return;
       const el = document.getElementById("bidInput"); if (!el) return;
       const price = parseInt(el.value || "0", 10) || 0;
-      const c = costBreakdown(price, it.분류);
+      const sqm = parseSqm(it.면적구조);
+      const multi = !!(document.getElementById("multiChk") || {}).checked;
+      const c = costBreakdown(price, it.분류, sqm, multi);
       const 감정 = it.감정가 || 0;
       const 대비 = 감정 ? Math.round((1 - price / 감정) * 100) : null;
       document.getElementById("bidCalcResult").innerHTML =
@@ -1056,6 +1095,25 @@
           '<div class="row"><span>표면 수익률</span><span class="val">' + 표면.toFixed(1) + '%</span></div>' +
           '<div class="row"><span>실질 수익률</span><span class="val low">' + 실질.toFixed(1) + '%</span></div>';
       } else { yb.innerHTML = ""; }
+      // 대출(LTV·원리금균등)
+      const lb = document.getElementById("loanResult"); if (!lb) return;
+      const ltv = parseFloat((document.getElementById("ltvInput") || {}).value || "0") || 0;
+      const rate = parseFloat((document.getElementById("rateInput") || {}).value || "0") || 0;
+      const years = parseInt((document.getElementById("yearInput") || {}).value || "0", 10) || 0;
+      if (ltv > 0 && price > 0) {
+        const 대출금 = Math.round(price * Math.min(ltv, 100) / 100);
+        const 실투자 = Math.max(0, c.총 - 대출금);
+        let 월상환 = 0;
+        if (대출금 > 0 && years > 0) {
+          const n = years * 12, r = rate / 100 / 12;
+          월상환 = r > 0 ? Math.round(대출금 * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1))
+                        : Math.round(대출금 / n);
+        }
+        lb.innerHTML =
+          '<div class="row"><span>대출금(LTV ' + ltv + '%)</span><span class="val">' + 억(대출금) + '</span></div>' +
+          '<div class="row"><span>실투자금(총원가−대출)</span><span class="val low">' + 억(실투자) + '</span></div>' +
+          (월상환 > 0 ? '<div class="row"><span>월 상환액(원리금균등)</span><span class="val">' + fmtWon(월상환) + '</span></div>' : '');
+      } else { lb.innerHTML = ""; }
     }
 
     // 좌표 → 법정동 시군구코드(5자리) : 국토부 실거래가 조회용
