@@ -23,15 +23,16 @@ jobs:
 
       - name: 공매 데이터 수집 (onbid.json 생성)
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 40
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
         run: python build_onbid.py
 
+      # 경매는 스크래핑만 ~25분 + 3만건 지오코딩 ~15분이라 넉넉히 90분.
       - name: 경매 데이터 수집 (data.json 생성)
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 90
         env:
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
         run: python build_data.py

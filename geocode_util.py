@@ -75,6 +75,7 @@ def geocode_items(items, addr_fn, max_new=40000, workers=8):
         else:
             todo.append((it, addr))
     todo = todo[:max_new]
+    total_new = len(todo)
     lock = threading.Lock()
     done = [0]
 
@@ -84,10 +85,16 @@ def geocode_items(items, addr_fn, max_new=40000, workers=8):
         with lock:
             cache[addr] = v
             done[0] += 1
+            # 진행 중에도 주기적으로 캐시를 저장한다. CI가 타임아웃으로 중간에
+            # 죽어도 여기까지의 지오코딩 결과가 보존돼, 다음 실행이 캐시로 이어받는다.
+            if done[0] % 500 == 0:
+                save_cache(cache)
+                print(f"  지오코딩 진행 {done[0]}/{total_new} (캐시 {len(cache)})", flush=True)
         if v:
             it["lat"], it["lng"] = v[0], v[1]
 
     if todo:
+        print(f"지오코딩 시작: 신규 대상 {total_new}건 (동시 {workers})", flush=True)
         with ThreadPoolExecutor(max_workers=workers) as ex:
             list(ex.map(work, todo))
         save_cache(cache)

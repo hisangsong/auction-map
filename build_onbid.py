@@ -60,9 +60,18 @@ def fetch_list(base, page):
     url = (base + "?serviceKey=" + quote(KEY, safe="") +
            "&numOfRows=" + str(ROWS) + "&pageNo=" + str(page) +
            "&resultType=json&prptDivCd=0007,0005&pvctTrgtYn=N")
-    r = requests.get(url, timeout=40)
-    r.raise_for_status()
-    return r.json()
+    # data.go.kr 은 간헐적으로 SSL 핸드셰이크/read 타임아웃이 난다 → 재시도.
+    last = None
+    for attempt in range(4):
+        try:
+            r = requests.get(url, timeout=40)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last = e
+            print(f"  공매 목록 재시도 {attempt + 1}/4 (page {page}): {e}", flush=True)
+            time.sleep(3 * (attempt + 1))
+    raise last
 
 
 def fetch_page(page):

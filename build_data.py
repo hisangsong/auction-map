@@ -108,13 +108,6 @@ def main():
     items = transform(rows)
     sido_list, gu_by_sido = build_sido_gu_index(items)
 
-    # 좌표 미리 저장(있을 때) - 프런트에서 실시간 변환 없이 지도 즉시 표시
-    try:
-        from geocode_util import geocode_items
-        geocode_items(items, lambda it: it.get("소재지"))
-    except Exception as e:
-        print("좌표 프리스토어 건너뜀:", e, flush=True)
-
     data = {
         "sido": sido_list,
         "guBySido": gu_by_sido,
@@ -122,11 +115,26 @@ def main():
         "updatedAt": datetime.date.today().isoformat(),
     }
 
-    OUT_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
-    print(f"완료: {len(items)}건 -> {OUT_PATH}", flush=True)
+    def write_out():
+        OUT_PATH.write_text(
+            json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+    # 1) 좌표 없이 먼저 저장 → 지오코딩이 타임아웃으로 중단돼도 최신 물건은 반영된다.
+    write_out()
+    print(f"1차 저장(좌표 전): {len(items)}건 -> {OUT_PATH}", flush=True)
+
+    # 2) 좌표 프리스토어(캐시 증분) 후 다시 저장 → 프런트가 실시간 변환 없이 즉시 표시.
+    #    items 를 제자리에서 갱신하므로 재저장하면 lat/lng 가 포함된다.
+    try:
+        from geocode_util import geocode_items
+        geocode_items(items, lambda it: it.get("소재지"))
+        write_out()
+        with_pos = sum(1 for it in items if it.get("lat") is not None)
+        print(f"완료: {len(items)}건(좌표 {with_pos}건) -> {OUT_PATH}", flush=True)
+    except Exception as e:
+        print("좌표 프리스토어 건너뜀:", e, flush=True)
 
 
 if __name__ == "__main__":
