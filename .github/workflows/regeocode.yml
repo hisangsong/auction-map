@@ -1,0 +1,41 @@
+name: 좌표 정밀 재적용 (주소검색 우선)
+
+# 저장본(data/onbid/car/asset.json)의 좌표를 주소검색 우선으로 다시 계산한다.
+# 스크래핑 없이 지오코딩만 하므로 시간을 모두 좌표 정밀화에 쓴다. 수동 실행 전용.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  regeocode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: pip install requests
+
+      - name: 좌표 정밀 재적용
+        env:
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          GEO_WORKERS: '8'
+        run: python regeocode_all.py
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json onbid.json car.json asset.json geocache.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "변경 없음, 커밋 생략"
+          else
+            git commit -m "chore: 좌표 정밀 재적용(주소검색 우선) ($(date -u +%F))"
+            git push
+          fi

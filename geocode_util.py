@@ -72,8 +72,11 @@ def _geocode_one(q):
     return None
 
 
-def geocode_items(items, addr_fn, max_new=40000, workers=8):
-    """items 각 원소에 lat/lng를 채운다. 캐시에 있으면 재사용, 없으면 신규 호출(최대 max_new)."""
+def geocode_items(items, addr_fn, max_new=40000, workers=8, refresh=False):
+    """items 각 원소에 lat/lng를 채운다. 캐시에 있으면 재사용, 없으면 신규 호출(최대 max_new).
+
+    refresh=True 면 캐시에 있어도 다시 지오코딩한다(주소검색 우선 방식으로 정밀 재적용).
+    """
     if not KEY:
         print("KAKAO_REST_KEY 없음 - 좌표 프리스토어 건너뜀", flush=True)
         return 0
@@ -83,12 +86,19 @@ def geocode_items(items, addr_fn, max_new=40000, workers=8):
         addr = addr_fn(it)
         if not addr:
             continue
-        if addr in cache:
+        if not refresh and addr in cache:
             v = cache[addr]
             if v:
                 it["lat"], it["lng"] = v[0], v[1]
         else:
             todo.append((it, addr))
+    # refresh 시 같은 주소가 여러 물건에 걸쳐 중복될 수 있으니 주소 단위로 1회만 호출.
+    if refresh:
+        seen, uniq = set(), []
+        for it, addr in todo:
+            if addr not in seen:
+                seen.add(addr); uniq.append((it, addr))
+        todo = uniq
     todo = todo[:max_new]
     total_new = len(todo)
     lock = threading.Lock()
@@ -113,5 +123,11 @@ def geocode_items(items, addr_fn, max_new=40000, workers=8):
         with ThreadPoolExecutor(max_workers=workers) as ex:
             list(ex.map(work, todo))
         save_cache(cache)
+    # 최종적으로 캐시값을 모든 물건에 반영(같은 주소 중복·refresh 갱신분 포함).
+    for it in items:
+        addr = addr_fn(it)
+        v = cache.get(addr) if addr else None
+        if v:
+            it["lat"], it["lng"] = v[0], v[1]
     print(f"지오코딩: 신규 {done[0]}건 / 캐시 {len(cache)}건", flush=True)
     return done[0]
