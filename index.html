@@ -13,6 +13,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="경매지도" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <style>
     :root {
       --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:rgba(148,163,184,0.18);
@@ -29,6 +30,10 @@
     .hdr-menu-btn { display:none; font-family:inherit; font-size:14px; font-weight:600; color:#0f172a;
       background:var(--accent); border:none; border-radius:8px; padding:8px 14px; cursor:pointer; margin-left:auto; }
     .hdr-menu-btn.active { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+    .auth-btn { font-family:inherit; font-size:13px; font-weight:600; color:var(--text); background:var(--panel2);
+      border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; margin-left:auto;
+      max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .auth-btn.in { border-color:#fbbf24; color:#fbbf24; }
     header h1 { font-size:17px; white-space:nowrap; }
     header h1 .dot { color:var(--accent); }
     .src-badge { font-size:11px; color:#34d399; background:rgba(52,211,153,0.12);
@@ -187,6 +192,7 @@
     <div class="hdr-bar">
       <h1>⚖️ <span class="dot">경매·공매</span> 지도</h1>
       <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
+      <button type="button" class="auth-btn" id="authBtn" onclick="onAuthClick()">로그인</button>
       <button type="button" class="hdr-menu-btn" id="hdrMenuBtn" onclick="toggleHdrMenu()">☰ 필터</button>
     </div>
     <div class="hdr-controls" id="hdrControls">
@@ -319,6 +325,7 @@
       const k = favKey(it);
       if (favorites.has(k)) favorites.delete(k); else favorites.add(k);
       saveFavorites();
+      syncUp();
       updateFavToggleLabel();
       if (curDetailItem === it) showDetail(it);
       apply();
@@ -427,6 +434,90 @@
       btn.textContent = open ? "✕ 닫기" : "☰ 필터";
     }
 
+    /* ==================== 로그인 + 클라우드 동기화(Supabase) ==================== */
+    const SUPABASE_URL = "https://sxpfzciboqzahqdfbqvv.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_IXe_zHBNiqcLKVoiUOCxtg_-x_dEYvr"; // 공개용(RLS 보호)
+    let sb = null, authUser = null, syncTimer = null;
+
+    function initAuth() {
+      if (!window.supabase) return;
+      try { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); } catch (e) { return; }
+      sb.auth.getSession().then(({ data }) => {
+        authUser = (data && data.session && data.session.user) || null;
+        updateAuthUI();
+        if (authUser) onLoggedIn();
+      });
+      sb.auth.onAuthStateChange((_evt, session) => {
+        const was = authUser && authUser.id;
+        authUser = (session && session.user) || null;
+        updateAuthUI();
+        if (authUser && authUser.id !== was) onLoggedIn();
+      });
+    }
+    function onAuthClick() {
+      if (!sb) { window.alert("로그인 기능 준비 중입니다. 잠시 후 다시 시도해 주세요."); return; }
+      if (authUser) {
+        if (window.confirm("로그아웃 할까요?")) sb.auth.signOut();
+      } else {
+        sb.auth.signInWithOAuth({ provider: "kakao",
+          options: { redirectTo: location.origin + location.pathname } })
+          .then(({ error }) => { if (error) window.alert("로그인 오류: " + error.message + "\n(Supabase에서 카카오 로그인 설정이 완료됐는지 확인해 주세요.)"); });
+      }
+    }
+    function updateAuthUI() {
+      const btn = document.getElementById("authBtn"); if (!btn) return;
+      if (authUser) {
+        const nm = (authUser.user_metadata && (authUser.user_metadata.name || authUser.user_metadata.nickname)) || authUser.email || "내 계정";
+        btn.textContent = "👤 " + nm;
+        btn.title = "탭하면 로그아웃";
+        btn.classList.add("in");
+      } else {
+        btn.textContent = "로그인";
+        btn.title = "카카오 로그인";
+        btn.classList.remove("in");
+      }
+    }
+    async function onLoggedIn() {
+      if (!sb || !authUser) return;
+      let data = null;
+      try {
+        const res = await sb.from("user_prefs").select("favorites,saved_filters,alert_email").eq("user_id", authUser.id).maybeSingle();
+        data = res.data;
+      } catch (e) { console.warn("prefs 로드 실패", e); }
+      // 관심목록 병합(로컬 ∪ 클라우드)
+      const cloudFav = (data && data.favorites) || [];
+      const merged = new Set([...loadFavorites(), ...cloudFav]);
+      favorites = merged; saveFavorites(); updateFavToggleLabel();
+      // 저장검색 병합(이름+조건 기준 중복 제거)
+      const cloudSaved = (data && data.saved_filters) || [];
+      const seen = new Set(), mergedSaved = [];
+      [...cloudSaved, ...loadSavedFilters()].forEach(f => {
+        const k = (f.name || "") + "|" + JSON.stringify(f);
+        if (!seen.has(k)) { seen.add(k); mergedSaved.push(f); }
+      });
+      persistSavedFilters(mergedSaved);
+      await pushPrefs();        // 병합 결과를 클라우드에 반영
+      apply();
+    }
+    async function pushPrefs() {
+      if (!sb || !authUser) return;
+      try {
+        await sb.from("user_prefs").upsert({
+          user_id: authUser.id,
+          favorites: [...favorites],
+          saved_filters: loadSavedFilters(),
+          email: authUser.email || null,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (e) { console.warn("prefs 저장 실패", e); }
+    }
+    // 로그인 상태면 관심목록·저장검색 변경을 클라우드로 올린다(0.8초 디바운스)
+    function syncUp() {
+      if (!sb || !authUser) return;
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(pushPrefs, 800);
+    }
+
     /* ==================== 3군: 알림·저장검색·지역통계 ==================== */
     // ① 매각기일 임박(D-7) 배너
     const ALERT_DISMISS_KEY = "auctionAlertDismiss";
@@ -531,10 +622,11 @@
       const saved = loadSavedFilters();
       saved.push(Object.assign({ name: name }, currentFilterObj()));
       persistSavedFilters(saved);
+      syncUp();
       openSavedFilters();
     }
     function runSavedFilter(i) { const f = loadSavedFilters()[i]; if (f) applySavedFilter(f); }
-    function deleteSavedFilter(i) { const s = loadSavedFilters(); s.splice(i, 1); persistSavedFilters(s); openSavedFilters(); }
+    function deleteSavedFilter(i) { const s = loadSavedFilters(); s.splice(i, 1); persistSavedFilters(s); syncUp(); openSavedFilters(); }
 
     // ④ 지역통계(히트맵 대체) — 현재 로드된 물건을 시/도·시군구별 집계
     function openRegionStats() {
@@ -1775,6 +1867,7 @@
       handle.addEventListener("pointercancel", end);
     }
 
+    initAuth();        // 로그인 세션 복원(카카오 OAuth 리다이렉트의 해시도 여기서 소비)
     setupBottomSheet();
     loadKakao();
 
