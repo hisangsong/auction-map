@@ -154,7 +154,7 @@
 
       .main { flex-direction:column; }
       .sidebar { position:absolute; left:0; right:0; bottom:0; width:auto; z-index:15;
-        height:var(--sheet-h,45vh); border-right:none; border-top:1px solid var(--line);
+        height:var(--sheet-h,22vh); border-right:none; border-top:1px solid var(--line);
         border-radius:16px 16px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.45);
         transition:height .25s ease; padding-top:0; }
       .sheet-handle { display:block; position:sticky; top:0; z-index:3; background:var(--panel);
@@ -167,7 +167,7 @@
       .item .addr { font-size:14px; }
       .item .price { font-size:16px; }
       #map { height:100%; }
-      .detail { left:10px; right:10px; width:auto; bottom:calc(var(--sheet-h,45vh) + 10px); max-height:52vh; }
+      .detail { left:10px; right:10px; width:auto; bottom:calc(var(--sheet-h,22vh) + 10px); max-height:52vh; }
       .doc-modal { padding:10px; }
       .doc-modal .box { padding:18px; max-height:88vh; }
     }
@@ -1734,7 +1734,7 @@
       const sheet = document.getElementById("sidebar");
       if (!handle || !sheet) return;
       const SNAPS = [22, 52, 88]; // vh: 살짝 / 절반 / 크게
-      let idx = 1;
+      let idx = 0; // 초기엔 최소화(지도 넓게) - 핸들을 끌어올려 목록 확장
       const vh = () => window.innerHeight / 100;
       const setH = (vhVal) => document.documentElement.style.setProperty("--sheet-h", vhVal + "vh");
       setH(SNAPS[idx]);
