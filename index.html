@@ -460,7 +460,7 @@
         if (window.confirm("로그아웃 할까요?")) sb.auth.signOut();
       } else {
         sb.auth.signInWithOAuth({ provider: "kakao",
-          options: { redirectTo: location.origin + location.pathname } })
+          options: { redirectTo: location.origin + location.pathname, scopes: "profile_nickname" } })
           .then(({ error }) => { if (error) window.alert("로그인 오류: " + error.message + "\n(Supabase에서 카카오 로그인 설정이 완료됐는지 확인해 주세요.)"); });
       }
     }
