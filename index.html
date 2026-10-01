@@ -182,12 +182,6 @@
     </aside>
     <div id="map">
       <button type="button" class="map-research-btn" id="mapResearchBtn" onclick="researchInMapBounds()">🔍 이 지역에서 재검색</button>
-      <button type="button" class="map-research-btn" id="radiusBtn" onclick="toggleRadiusMode()" style="top:52px;">◎ 반경검색</button>
-      <div id="radiusPanel" style="display:none;position:absolute;top:92px;left:12px;z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--text);box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:230px;">
-        <div style="margin-bottom:6px;color:var(--muted);">지도를 클릭해 중심을 정하세요</div>
-        <div style="display:flex;align-items:center;gap:8px;">반경 <input id="radiusRange" type="range" min="500" max="10000" step="500" value="2000" style="flex:1;" oninput="onRadiusRange(this.value)"><span id="radiusLabel">2.0km</span></div>
-        <div id="radiusResult" style="margin-top:6px;color:var(--accent);"></div>
-      </div>
     </div>
   </div>
 
@@ -376,7 +370,7 @@
       );
     }
 
-    /* ==================== 3군: 알림·저장검색·반경·지역통계 ==================== */
+    /* ==================== 3군: 알림·저장검색·지역통계 ==================== */
     // ① 매각기일 임박(D-7) 배너
     const ALERT_DISMISS_KEY = "auctionAlertDismiss";
     function upcomingFavItems(days) {
@@ -512,59 +506,6 @@
       h += '</div>';
       body.innerHTML = h;
       document.getElementById("docModal").classList.add("show");
-    }
-
-    // ⑤ 반경검색 — 지도에서 중심 클릭 + 반경 슬라이더로 원 안 물건만
-    let radiusMode = false, radiusCircle = null, radiusCenter = null, radiusM = 2000, radiusClickL = null;
-    function toggleRadiusMode() {
-      radiusMode = !radiusMode;
-      document.getElementById("radiusBtn").classList.toggle("active", radiusMode);
-      document.getElementById("radiusPanel").style.display = radiusMode ? "" : "none";
-      if (radiusMode) {
-        radiusClickL = (e) => { radiusCenter = e.latLng; runRadiusSearch(); };
-        kakao.maps.event.addListener(map, "click", radiusClickL);
-      } else {
-        if (radiusClickL) kakao.maps.event.removeListener(map, "click", radiusClickL);
-        if (radiusCircle) { radiusCircle.setMap(null); radiusCircle = null; }
-        radiusCenter = null;
-        document.getElementById("radiusResult").textContent = "";
-      }
-    }
-    function onRadiusRange(v) {
-      radiusM = +v;
-      document.getElementById("radiusLabel").textContent = (radiusM / 1000).toFixed(1) + "km";
-      if (radiusCenter) runRadiusSearch();
-    }
-    function haversine(lat1, lng1, lat2, lng2) {
-      const R = 6371000, toR = Math.PI / 180;
-      const dLat = (lat2 - lat1) * toR, dLng = (lng2 - lng1) * toR;
-      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toR) * Math.cos(lat2 * toR) * Math.sin(dLng / 2) ** 2;
-      return 2 * R * Math.asin(Math.sqrt(a));
-    }
-    async function runRadiusSearch() {
-      if (!radiusCenter) return;
-      const cLat = radiusCenter.getLat(), cLng = radiusCenter.getLng();
-      if (radiusCircle) radiusCircle.setMap(null);
-      radiusCircle = new kakao.maps.Circle({
-        center: radiusCenter, radius: radiusM, strokeWeight: 2, strokeColor: "#38bdf8",
-        strokeOpacity: .9, fillColor: "#38bdf8", fillOpacity: .12,
-      });
-      radiusCircle.setMap(map);
-      const rb = document.getElementById("radiusResult"); rb.textContent = "검색 중…";
-      const region = await coord2Region(cLng, cLat);
-      const inR = (it) => it.lat != null && haversine(cLat, cLng, it.lat, it.lng) <= radiusM;
-      const matched = [], need = [];
-      for (const it of buildFilteredItems({ includeSido: false })) {
-        if (it.lat != null) { if (inR(it)) matched.push(it); }
-        else if (!region || it.시도 === region.region_1depth_name) need.push(it);
-      }
-      await geocodeMany(need.slice(0, MAP_RESEARCH_MAX_GEOCODE), 8);
-      need.forEach(it => { if (inR(it)) matched.push(it); });
-      activeIdx = -1; closeDetail();
-      mapSearchActive = true; userMovedMap = true;
-      lastTotal = matched.length; shownNatural = matched; applySort();
-      render(false);
-      rb.textContent = "반경 " + (radiusM / 1000).toFixed(1) + "km · " + matched.length + "건";
     }
 
     function loadKakao() {
