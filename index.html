@@ -14,7 +14,12 @@
     body { font-family:"Segoe UI",-apple-system,"Malgun Gothic",sans-serif; background:var(--bg);
       color:var(--text); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
     header { flex:0 0 auto; padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--line);
-      display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+      display:flex; flex-direction:column; gap:10px; }
+    .hdr-bar { display:flex; align-items:center; gap:12px; }
+    .hdr-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .hdr-menu-btn { display:none; font-family:inherit; font-size:14px; font-weight:600; color:#0f172a;
+      background:var(--accent); border:none; border-radius:8px; padding:8px 14px; cursor:pointer; margin-left:auto; }
+    .hdr-menu-btn.active { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
     header h1 { font-size:17px; white-space:nowrap; }
     header h1 .dot { color:var(--accent); }
     .src-badge { font-size:11px; color:#34d399; background:rgba(52,211,153,0.12);
@@ -123,9 +128,33 @@
     .overlay-msg p { color:var(--muted); line-height:1.7; font-size:14px; }
     .sheet-handle { display:none; }
     @media (max-width:720px) {
+      /* 헤더: 제목+☰필터만 보이는 얇은 바. 필터는 탭하면 펼쳐지는 패널로. */
+      header { padding:9px 14px; gap:8px; }
+      .hdr-bar h1 { font-size:16px; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; }
+      .src-badge { display:none; }
+      .hdr-menu-btn { display:inline-flex; align-items:center; }
+      .hdr-controls { display:none; }
+      .hdr-controls.open { display:flex; flex-wrap:wrap; align-items:stretch;
+        gap:9px; max-height:70vh; overflow-y:auto; padding-top:6px;
+        border-top:1px solid var(--line); margin-top:2px; }
+      /* 입력류(구분·시도·구·검색·금액·면적)는 한 줄 꽉 차게, 크게 */
+      .hdr-controls.open > select,
+      .hdr-controls.open > #searchInput,
+      .hdr-controls.open > .price-dd { flex:1 1 100%; width:100%; font-size:15px; }
+      .hdr-controls.open > select,
+      .hdr-controls.open > #searchInput { padding:11px 12px; }
+      .hdr-controls.open > .price-dd .price-dd-btn { width:100%; font-size:15px; padding:11px 12px; max-width:none; }
+      .hdr-controls.open .price-dd-panel { position:static; box-shadow:none; margin-top:6px; }
+      /* 액션 버튼(추천·관심·비교 등)은 2개씩 나란히 */
+      .hdr-controls.open > .fav-toggle { flex:1 1 calc(50% - 5px); font-size:14px; padding:11px 8px; text-align:center; }
+      .hdr-controls.open .filters,
+      .hdr-controls.open #yuchalFilters { margin-left:0; flex:1 1 100%; gap:8px; }
+      .hdr-controls.open .filters button,
+      .hdr-controls.open #yuchalFilters button { flex:1 1 auto; font-size:14px; padding:9px 10px; }
+
       .main { flex-direction:column; }
       .sidebar { position:absolute; left:0; right:0; bottom:0; width:auto; z-index:15;
-        height:var(--sheet-h,50vh); border-right:none; border-top:1px solid var(--line);
+        height:var(--sheet-h,45vh); border-right:none; border-top:1px solid var(--line);
         border-radius:16px 16px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.45);
         transition:height .25s ease; padding-top:0; }
       .sheet-handle { display:block; position:sticky; top:0; z-index:3; background:var(--panel);
@@ -133,35 +162,45 @@
         margin:0 -12px; }
       .sheet-handle::before { content:""; display:block; width:44px; height:5px; border-radius:3px;
         background:var(--muted); opacity:.7; margin:0 auto; }
-      .count { padding-top:8px; }
+      .count { padding-top:8px; font-size:12.5px; }
+      .item { padding:13px; }
+      .item .addr { font-size:14px; }
+      .item .price { font-size:16px; }
       #map { height:100%; }
-      .detail { left:12px; right:12px; width:auto; bottom:calc(var(--sheet-h,50vh) + 12px); max-height:56vh; }
+      .detail { left:10px; right:10px; width:auto; bottom:calc(var(--sheet-h,45vh) + 10px); max-height:52vh; }
+      .doc-modal { padding:10px; }
+      .doc-modal .box { padding:18px; max-height:88vh; }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>⚖️ 전국 <span class="dot">법원경매물건</span> 지도</h1>
-    <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
-    <select id="srcSel"></select>
-    <select id="sidoSel"></select>
-    <select id="guSel"></select>
-    <input id="searchInput" type="search" placeholder="🔎 주소·물건명·사건번호" oninput="onSearchInput(this.value)"
-      style="font-family:inherit;font-size:13px;color:var(--text);background:var(--panel2);border:1px solid var(--line);padding:7px 12px;border-radius:8px;min-width:150px;">
-    <div class="price-dd" id="priceDd">
-      <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
-      <div class="price-dd-panel" id="priceDdPanel"></div>
+    <div class="hdr-bar">
+      <h1>⚖️ <span class="dot">경매·공매</span> 지도</h1>
+      <span class="src-badge" id="srcBadge">전국 법원경매 실데이터</span>
+      <button type="button" class="hdr-menu-btn" id="hdrMenuBtn" onclick="toggleHdrMenu()">☰ 필터</button>
     </div>
-    <select id="areaSel" onchange="onAreaChange(this.value)"></select>
-    <button type="button" class="fav-toggle" id="recBtn">⭐ 추천물건</button>
-    <button type="button" class="fav-toggle" id="favToggleBtn"></button>
-    <button type="button" class="fav-toggle" id="compareBtn" onclick="openCompare()">📋 비교·일정</button>
-    <button type="button" class="fav-toggle" id="shareBtn" onclick="shareView()">🔗 공유</button>
-    <button type="button" class="fav-toggle" id="savedBtn" onclick="openSavedFilters()">🔔 저장검색</button>
-    <button type="button" class="fav-toggle" id="statsBtn" onclick="openRegionStats()">📊 지역통계</button>
-    <button type="button" class="fav-toggle" id="infoBtn" onclick="showInfo()" title="안내">ℹ️</button>
-    <div class="filters" id="filters"></div>
-    <div class="filters" id="yuchalFilters"></div>
+    <div class="hdr-controls" id="hdrControls">
+      <select id="srcSel"></select>
+      <select id="sidoSel"></select>
+      <select id="guSel"></select>
+      <input id="searchInput" type="search" placeholder="🔎 주소·물건명·사건번호" oninput="onSearchInput(this.value)"
+        style="font-family:inherit;font-size:13px;color:var(--text);background:var(--panel2);border:1px solid var(--line);padding:7px 12px;border-radius:8px;min-width:150px;">
+      <div class="price-dd" id="priceDd">
+        <button type="button" class="price-dd-btn" id="priceDdBtn"></button>
+        <div class="price-dd-panel" id="priceDdPanel"></div>
+      </div>
+      <select id="areaSel" onchange="onAreaChange(this.value)"></select>
+      <button type="button" class="fav-toggle" id="recBtn">⭐ 추천물건</button>
+      <button type="button" class="fav-toggle" id="favToggleBtn"></button>
+      <button type="button" class="fav-toggle" id="compareBtn" onclick="openCompare()">📋 비교·일정</button>
+      <button type="button" class="fav-toggle" id="shareBtn" onclick="shareView()">🔗 공유</button>
+      <button type="button" class="fav-toggle" id="savedBtn" onclick="openSavedFilters()">🔔 저장검색</button>
+      <button type="button" class="fav-toggle" id="statsBtn" onclick="openRegionStats()">📊 지역통계</button>
+      <button type="button" class="fav-toggle" id="infoBtn" onclick="showInfo()" title="안내">ℹ️ 안내</button>
+      <div class="filters" id="filters"></div>
+      <div class="filters" id="yuchalFilters"></div>
+    </div>
     <div id="alertBanner" style="display:none;width:100%;margin-top:8px;padding:9px 12px;border-radius:10px;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.4);font-size:12.5px;color:#bae6fd;line-height:1.5;"></div>
   </header>
 
@@ -368,6 +407,15 @@
         "⚠️ 이 앱의 정보는 공개데이터 기반 참고자료이며 법적 효력이 없습니다.\n" +
         "입찰 전 반드시 매각물건명세서·감정평가서·등기사항전부증명서 원본을 직접 확인하세요."
       );
+    }
+
+    // 모바일: 헤더 필터 패널 펼치기/접기
+    function toggleHdrMenu() {
+      const el = document.getElementById("hdrControls");
+      const open = el.classList.toggle("open");
+      const btn = document.getElementById("hdrMenuBtn");
+      btn.classList.toggle("active", open);
+      btn.textContent = open ? "✕ 닫기" : "☰ 필터";
     }
 
     /* ==================== 3군: 알림·저장검색·지역통계 ==================== */
