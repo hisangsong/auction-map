@@ -320,11 +320,48 @@
     }
     function favKey(it) { return it.고유번호 || (it.사건번호 + "|" + it.소재지); }
     function isFav(it) { return favorites.has(favKey(it)); }
+
+    /* ---------- 유찰·가격변동 추적 ----------
+       관심 등록 시점의 최저가·유찰·매각기일을 저장(favSnap)해 두고,
+       이후 데이터가 갱신돼 유찰로 최저가가 떨어지면 변동을 표시한다. */
+    const FAVSNAP_KEY = "auctionFavSnap";
+    function loadFavSnap() { try { return JSON.parse(localStorage.getItem(FAVSNAP_KEY) || "{}"); } catch (e) { return {}; } }
+    let favSnap = loadFavSnap();
+    function saveFavSnap() { try { localStorage.setItem(FAVSNAP_KEY, JSON.stringify(favSnap)); } catch (e) {} }
+    function snapOf(it) { return { price: it.최저가 || 0, yuchal: it.유찰 || 0, date: it.매각기일 || "", ts: Date.now() }; }
+    // 기존 관심물건(스냅샷 없던 것)은 현재값을 기준선으로 한 번 기록(오탐 방지)
+    function ensureFavSnaps() {
+      let changed = false;
+      favItems().forEach(it => { const k = favKey(it); if (!favSnap[k]) { favSnap[k] = snapOf(it); changed = true; } });
+      if (changed) saveFavSnap();
+    }
+    // 관심 등록 후 변동: 최저가 하락/유찰 증가/기일 변경
+    function favChange(it) {
+      const s = favSnap[favKey(it)];
+      if (!s) return null;
+      const cur = it.최저가 || 0;
+      const drop = (s.price || 0) - cur;
+      const yUp = (it.유찰 || 0) - (s.yuchal || 0);
+      const dateChg = s.date && it.매각기일 && s.date !== it.매각기일;
+      if (drop <= 0 && yUp <= 0 && !dateChg) return null;
+      return { drop, pct: s.price ? Math.round(drop / s.price * 100) : 0, yUp, dateChg, base: s };
+    }
+    function favChangeText(it) {
+      const c = favChange(it); if (!c) return "";
+      const parts = [];
+      if (c.drop > 0) parts.push("최저가 " + c.pct + "%↓(" + 억(c.drop) + ")");
+      if (c.yUp > 0) parts.push("유찰 +" + c.yUp + "회");
+      if (c.dateChg) parts.push("기일변경");
+      return parts.join(" · ");
+    }
+
     function toggleFav(it) {
       if (!it) return;
       const k = favKey(it);
-      if (favorites.has(k)) favorites.delete(k); else favorites.add(k);
+      if (favorites.has(k)) { favorites.delete(k); delete favSnap[k]; }
+      else { favorites.add(k); favSnap[k] = snapOf(it); }
       saveFavorites();
+      saveFavSnap();
       syncUp();
       updateFavToggleLabel();
       if (curDetailItem === it) showDetail(it);
@@ -945,6 +982,7 @@
       }
       render();
       writeHash(null);
+      ensureFavSnaps();
       renderAlertBanner();
     }
 
@@ -1022,7 +1060,8 @@
           '<div class="addr">'+it.소재지+'</div>'+
           '<div class="row2"><span class="price">'+억(it.최저가)+' <span class="meta">('+it.최저가율+'%)</span></span>'+
           '<span class="meta">'+it.유찰구분+' · '+it.매각기일+'</span></div>'+
-          (curRecOnly ? '<div class="meta" style="color:#fbbf24;margin-top:5px;">⭐ '+추천사유(it)+'</div>' : '');
+          (curRecOnly ? '<div class="meta" style="color:#fbbf24;margin-top:5px;">⭐ '+추천사유(it)+'</div>' : '')+
+          (isFav(it) && favChangeText(it) ? '<div class="meta" style="color:#34d399;margin-top:5px;">💧 관심등록 후 '+favChangeText(it)+'</div>' : '');
         el.onclick = () => selectItem(i);
         el.querySelector(".fav-star").onclick = (e) => { e.stopPropagation(); toggleFav(it); };
         list.appendChild(el);
@@ -1356,15 +1395,17 @@
       const dv = (x) => { const d = dday(x.매각기일); return d == null ? 1e9 : d < 0 ? 1e8 + Math.abs(d) : d; };
       items.sort((a, b) => dv(a) - dv(b));
       let h = '<h3>📋 관심물건 비교·일정 (' + items.length + ')</h3><div style="overflow-x:auto;"><table>' +
-        '<tr><th>물건</th><th>용도</th><th>감정가</th><th>최저가(율)</th><th>유찰</th><th>매각기일</th><th>평단가</th><th>예상낙찰</th><th>주의</th></tr>';
+        '<tr><th>물건</th><th>용도</th><th>감정가</th><th>최저가(율)</th><th>유찰</th><th>변동</th><th>매각기일</th><th>평단가</th><th>예상낙찰</th><th>주의</th></tr>';
       items.forEach(it => {
         const d = dday(it.매각기일);
         const dds = d == null ? "-" : d > 0 ? "D-" + d : d === 0 ? "D-DAY" : Math.abs(d) + "일경과";
         const sqm = parseSqm(it.면적구조);
         const py = sqm ? 억(Math.round((it.최저가 || 0) / (sqm / 3.305785))) : "-";
         const est = it.감정가 ? 억(Math.round(it.감정가 * (낙찰가율참고[it.분류] || 0.72))) : "-";
+        const chg = favChangeText(it);
         h += '<tr><td>' + (it.소재지 || it.물건명 || "") + '</td><td>' + (it.용도 || "") + (it.구분 === "공매" ? " <span style=\"color:#a78bfa\">(공매)</span>" : "") +
           '</td><td>' + 억(it.감정가) + '</td><td>' + 억(it.최저가) + ' (' + (it.최저가율 || "-") + '%)</td><td>' + (it.유찰 || 0) +
+          '</td><td>' + (chg ? '<span style="color:#34d399;">💧 ' + chg + '</span>' : '-') +
           '</td><td>' + (it.매각기일 || "-") + '<br><span style="color:var(--accent);">' + dds + '</span></td><td>' + py + '</td><td>' + est +
           '</td><td>' + (riskFlags(it).length ? "⚠️" : "") + '</td></tr>';
       });
@@ -1503,6 +1544,7 @@
           '<span class="discount">'+it.최저가율+'%</span></span></div>'+
         '<div class="row"><span>유찰</span><span class="val">'+it.유찰구분+' ('+it.유찰+'회)</span></div>'+
         '<div class="row"><span>매각기일</span><span class="val">'+it.매각기일+'</span></div>'+
+        (isFav(it) && favChangeText(it) ? '<div class="note" style="color:#34d399;">💧 관심등록 후 '+favChangeText(it)+'</div>' : '')+
         (it.면적구조 ? '<div class="note">📐 '+it.면적구조+'</div>' : '')+
         (it.비고 ? '<div class="note">📌 '+it.비고+'</div>' : '')+
         bidHelperHtml(it)+
@@ -1543,6 +1585,7 @@
         '<div class="row"><span>입찰기간</span><span class="val">'+기간+'</span></div>'+
         '<div class="row"><span>상태</span><span class="val">'+(it.상태 || "-")+'</span></div>'+
         '<div class="row"><span>물건관리번호</span><span class="val">'+(it.사건번호 || "-")+'</span></div>'+
+        (isFav(it) && favChangeText(it) ? '<div class="note" style="color:#34d399;">💧 관심등록 후 '+favChangeText(it)+'</div>' : '')+
         bidHelperHtml(it)+
         '<button class="fav-star-detail'+(isFav(it)?' active':'')+'" onclick="toggleFav(curDetailItem)" style="margin-top:14px;">'+
           (isFav(it)?'★ 관심목록에서 제거':'☆ 관심목록에 추가')+'</button>'+
