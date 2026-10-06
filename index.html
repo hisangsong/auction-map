@@ -665,6 +665,41 @@
     function runSavedFilter(i) { const f = loadSavedFilters()[i]; if (f) applySavedFilter(f); }
     function deleteSavedFilter(i) { const s = loadSavedFilters(); s.splice(i, 1); persistSavedFilters(s); syncUp(); openSavedFilters(); }
 
+    // 실측 매각통계(매일 누적) 로드
+    let saleResults = null, saleResultsTried = false;
+    async function ensureSaleResults() {
+      if (saleResultsTried) return saleResults;
+      saleResultsTried = true;
+      try { const r = await fetch("sale_results.json", { cache: "no-cache" }); if (r.ok) saleResults = await r.json(); } catch (e) {}
+      return saleResults;
+    }
+    function saleResultsHtml() {
+      if (!saleResults || !saleResults.agg) return "";
+      const scope = (curSido && curSido !== "전국") ? curSido : null;
+      const byCls = {};
+      Object.entries(saleResults.agg).forEach(([k, v]) => {
+        const i = k.indexOf("|"); const sido = k.slice(0, i), cls = k.slice(i + 1);
+        if (scope && sido !== scope) return;
+        const a = byCls[cls] || (byCls[cls] = { sold: 0, withdrawn: 0, yuchal: 0, rateSum: 0, rateN: 0 });
+        a.sold += v.sold || 0; a.withdrawn += v.withdrawn || 0; a.yuchal += v.yuchal || 0;
+        a.rateSum += v.rateSum || 0; a.rateN += v.rateN || 0;
+      });
+      const rows = Object.entries(byCls).filter(([c, a]) => (a.sold + a.yuchal + a.withdrawn) > 0)
+        .sort((x, y) => (y[1].sold + y[1].yuchal) - (x[1].sold + x[1].yuchal));
+      let h = '<div class="sec-h" style="margin-top:16px;">실측 매각통계 (누적 ' + (saleResults.days || 0) + '일, 관찰 기반)</div>';
+      if (!rows.length) return h + '<div class="doc-msg">매일 공고 변화를 관측해 누적 중입니다. 표본이 쌓이면 용도별 매각률·낙찰하한율이 여기 표시됩니다.</div>';
+      h += '<div style="overflow-x:auto;"><table><tr><th>용도</th><th>매각(추정)</th><th>유찰</th><th>매각률</th><th>평균 낙찰하한율</th></tr>';
+      rows.forEach(([c, a]) => {
+        const tot = a.sold + a.yuchal;
+        const rate = tot ? Math.round(a.sold / tot * 100) : 0;
+        const low = a.rateN ? Math.round(a.rateSum / a.rateN) : null;
+        h += '<tr><td>' + c + '</td><td>' + a.sold + '</td><td>' + a.yuchal + '</td><td>' + rate + '%</td><td>' + (low != null ? low + '%' : '-') + '</td></tr>';
+      });
+      h += '</table></div>';
+      h += '<div class="doc-msg">※ 매일 공고 변화를 관측해 누적한 추정치(정확한 낙찰가 아님). 낙찰하한율 = 매각 시점 최저가÷감정가 평균 → 실제 낙찰가는 이 이상입니다.</div>';
+      return h;
+    }
+
     // 용도별 통계: 물건수·평균 유찰횟수·감정가 대비 평균 최저가율(현재 매물 실데이터)
     function classStats(items) {
       const by = {};
@@ -683,11 +718,12 @@
       })).sort((x, y) => y.n - x.n);
     }
 
-    // ④ 통계 — 용도별(유찰·저감율) + 지역별(물건수·평균최저가). 현재 로드된 실데이터 기준.
-    function openRegionStats() {
+    // ④ 통계 — 용도별(유찰·저감율) + 실측 매각통계 + 지역별. 현재 로드된 실데이터 기준.
+    async function openRegionStats() {
       const body = document.getElementById("docModalBody");
       const items = buildFilteredItems({ includeSido: false });
       if (!items.length) { body.innerHTML = '<h3>📊 통계</h3><p style="color:var(--muted);">집계할 물건이 없습니다.</p>'; document.getElementById("docModal").classList.add("show"); return; }
+      await ensureSaleResults();
 
       let h = '<h3>📊 통계 · ' + (curSido && curSido !== "전국" ? curSido : "전국") + '</h3>';
       h += '<p style="color:var(--muted);font-size:12px;">현재 조건으로 로드된 <b>' + items.length.toLocaleString() + '건</b> 실데이터 기준 (진행 중 매물). 과거 실제 낙찰가가 아니라 <b>현재 최저가 분포</b>로 본 눈높이입니다.</p>';
@@ -701,6 +737,9 @@
       });
       h += '</table></div>';
       h += '<div class="doc-msg">※ 평균 최저가율 = 현재 최저가÷감정가 평균(낮을수록 많이 유찰·저감). 참고 낙찰가율은 통계 기반 추정치로 예상낙찰가 계산에 쓰입니다.</div>';
+
+      // 실측 매각통계(매일 누적)
+      h += saleResultsHtml();
 
       // 지역별 통계
       const byField = (curSido && curSido !== "전국") ? "시군구" : "시도";

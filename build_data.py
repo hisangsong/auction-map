@@ -121,6 +121,15 @@ def main():
             encoding="utf-8",
         )
 
+    # 0) 매각결과 수집: 이전(어제) data.json ↔ 오늘 items 를 비교해 누적(sale_results.json).
+    #    반드시 data.json 을 덮어쓰기 전에 수행한다.
+    try:
+        from results_collector import update_results
+        old = json.loads(OUT_PATH.read_text(encoding="utf-8")) if OUT_PATH.exists() else {"items": []}
+        update_results(old.get("items", []), items, OUT_PATH.parent / "sale_results.json")
+    except Exception as e:
+        print("매각결과 수집 건너뜀:", e, flush=True)
+
     # 1) 좌표 없이 먼저 저장 → 지오코딩이 타임아웃으로 중단돼도 최신 물건은 반영된다.
     write_out()
     print(f"1차 저장(좌표 전): {len(items)}건 -> {OUT_PATH}", flush=True)
