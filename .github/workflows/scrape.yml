@@ -61,5 +61,10 @@ jobs:
             echo "변경 없음, 커밋 생략"
           else
             git commit -m "chore: 경매/공매 데이터 자동 갱신 ($(date -u +%F))"
-            git push
+            # 하루 3회 실행·수동 커밋과 겹치면 원격이 앞서 push가 거부될 수 있다.
+            # rebase 후 재시도해 안전하게 올린다(데이터 파일과 다른 파일 충돌 없음).
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin main && git push && break
+              echo "push 재시도 $i..."; sleep 5
+            done
           fi
