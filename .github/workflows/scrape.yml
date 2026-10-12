@@ -26,6 +26,15 @@ jobs:
       - name: 의존성 설치
         run: pip install requests pandas openpyxl
 
+      # Supabase 무료 프로젝트는 7일 무활동 시 자동 정지됨 → 매일 가벼운 조회로 활성 유지.
+      # (publishable 키는 공개용. 로그인·동기화 DB가 멈추지 않도록 유지)
+      - name: Supabase 활성 유지 (keep-alive)
+        continue-on-error: true
+        run: |
+          curl -s -o /dev/null -w "supabase keep-alive: HTTP %{http_code}\n" --max-time 20 \
+            "https://sxpfzciboqzahqdfbqvv.supabase.co/rest/v1/user_prefs?select=user_id&limit=1" \
+            -H "apikey: sb_publishable_IXe_zHBNiqcLKVoiUOCxtg_-x_dEYvr" || true
+
       - name: 공매 데이터 수집 (onbid.json 생성)
         continue-on-error: true
         timeout-minutes: 40
