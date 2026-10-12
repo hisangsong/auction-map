@@ -2,7 +2,12 @@ name: 법원경매물건 데이터 자동 갱신
 
 on:
   schedule:
-    - cron: '0 21 * * *'  # 매일 21:00 UTC = 매일 06:00 KST
+    # 한국 공공사이트(courtauction·data.go.kr)가 GitHub 해외 IP를 간헐 차단해
+    # 특정 회차가 연결 타임아웃으로 실패할 수 있다 → 하루 3회 시도(실패 대비).
+    # 먼저 성공한 회차가 커밋하면, 같은 날 뒤 회차는 변경 없어 그냥 넘어간다.
+    - cron: '0 21 * * *'   # 06:00 KST
+    - cron: '0 3 * * *'    # 12:00 KST
+    - cron: '0 9 * * *'    # 18:00 KST
   workflow_dispatch: {}
 
 permissions:
