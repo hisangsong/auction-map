@@ -148,7 +148,7 @@ _thread_local = threading.local()
 # 페이지를 순차로 받으면 772페이지 × ~2.6초 ≈ 25분이 걸린다. 각 페이지 요청은
 # pageNo 를 payload 에 담아 독립적이므로, 병렬로 나눠 받으면 몇 분으로 줄어든다.
 # courtauction 의 부하/차단을 고려해 동시성은 보수적으로(기본 6) 둔다.
-PAGE_WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
+PAGE_WORKERS = int(os.environ.get("SCRAPE_WORKERS", "4"))
 
 
 def _get_session() -> requests.Session:
@@ -172,6 +172,9 @@ def _fetch_page(page_no: int, bgng: str, end: str) -> list[dict]:
         try:
             session = _get_session()
             resp = session.post(API_URL, json=payload, timeout=40)
+            if resp.status_code in (403, 429):
+                # 명시적 차단/제한 신호 → 재시도하면 차단이 심해지므로 즉시 중단
+                raise RuntimeError(f"차단신호 HTTP {resp.status_code} (재시도 중단)")
             if resp.status_code != 200:
                 raise RuntimeError(f"HTTP {resp.status_code}")
             body = resp.json()
@@ -180,6 +183,8 @@ def _fetch_page(page_no: int, bgng: str, end: str) -> list[dict]:
             return body.get("data", {}).get("dlt_srchResult") or []
         except Exception as e:
             last_err = e
+            if "차단신호" in str(e):
+                raise
             print(f"  {page_no}페이지 재시도 {attempt + 1}/5 ({e})", flush=True)
             time.sleep(2 * (attempt + 1) + random.random())
             _thread_local.session = None  # 세션 재수립 유도

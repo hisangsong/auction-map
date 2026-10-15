@@ -65,10 +65,14 @@ def fetch_list(base, page):
     for attempt in range(4):
         try:
             r = requests.get(url, timeout=40)
+            if r.status_code in (403, 429):
+                raise RuntimeError(f"차단신호 HTTP {r.status_code} (재시도 중단)")
             r.raise_for_status()
             return r.json()
         except Exception as e:
             last = e
+            if "차단신호" in str(e):
+                raise
             print(f"  공매 목록 재시도 {attempt + 1}/4 (page {page}): {e}", flush=True)
             time.sleep(3 * (attempt + 1))
     raise last
@@ -253,6 +257,13 @@ def main():
 
     items = list(by_no.values())
     today = datetime.date.today().strftime("%Y-%m-%d")
+
+    # 안전 가드: 공매 수집이 비정상적으로 적으면 기존 onbid.json 을 유지하고 종료
+    # (동산·자동차도 이번 회차는 건너뜀). 평상시 공매 ~8~9천건.
+    MIN_ONBID = 3000
+    if len(items) < MIN_ONBID:
+        print(f"⚠ 공매 수집 건수 부족({len(items)} < {MIN_ONBID}) — 기존 onbid.json 유지, 저장 건너뜀", flush=True)
+        return
 
     try:
         from geocode_util import geocode_items

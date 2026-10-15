@@ -106,6 +106,16 @@ def main():
     rows = fetch_all()
 
     items = transform(rows)
+
+    # 안전 가드: 수집 건수가 비정상적으로 적으면(차단·부분실패) 기존 data.json 을 그대로 두고
+    # 종료한다. 이렇게 안 하면 빈/부분 수집이 그대로 배포되거나, 매각결과 수집기가 어제 물건
+    # 전부를 '사라짐=매각'으로 오집계한다. (평상시 경매 ~3만건)
+    MIN_AUCTION = 20000
+    if len(items) < MIN_AUCTION:
+        print(f"⚠ 경매 수집 건수 부족({len(items)} < {MIN_AUCTION}) — 기존 data.json 유지, "
+              f"매각결과 수집·저장 건너뜀", flush=True)
+        return
+
     sido_list, gu_by_sido = build_sido_gu_index(items)
 
     data = {
